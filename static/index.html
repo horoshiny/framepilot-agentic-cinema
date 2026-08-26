@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>FramePilot — Agentic Previsualisation</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/cinematic.css">
 </head>
 <body>
   <header>
@@ -28,6 +29,15 @@ Mara raises the lantern. Beyond the trees, a door stands open although no one ha
     <section class="workspace">
       <div class="toolbar"><span>SHOT 01</span><span id="time">00:00 / 00:08</span></div>
       <div id="stage" class="stage">
+        <div id="uploadedScene" class="uploaded-scene" hidden>
+          <div class="image-plane image-back"></div>
+          <div class="image-plane image-mid"></div>
+          <div class="image-plane image-front"></div>
+          <canvas id="particleCanvas" class="particles" aria-hidden="true"></canvas>
+          <div class="agent-fog fog-near"></div>
+          <div class="agent-fog fog-far"></div>
+          <div class="light-bloom"></div>
+        </div>
         <div class="sky layer"></div>
         <div class="moon"></div>
         <div class="cabin layer"><div class="door"></div></div>
@@ -70,4 +80,3 @@ Mara raises the lantern. Beyond the trees, a door stands open although no one ha
   <script src="/static/app.js"></script>
 </body>
 </html>
-

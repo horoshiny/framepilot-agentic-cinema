@@ -12,7 +12,10 @@ DIRECTOR_PROMPT = """You are FramePilot's previsualisation director. Analyse the
 screenplay excerpt and optional storyboard image, then return one restrained, controllable
 2.5D shot plan. Direct the emotional beat rather than decorating the frame. Camera motion,
 depth, atmosphere and transition must be justified by narrative focus. Never claim full
-character rigging or invent action that is absent from the screenplay. Output only the
+character rigging or invent action that is absent from the screenplay. Treat atmosphere
+as an effect budget: select only effects visibly supported by the image or explicitly
+motivated by the screenplay, and return an empty list when none is warranted. Do not add
+rain merely because a scene is dark. Output only the
 requested schema."""
 
 CRITIC_PROMPT = """You are an exacting film previsualisation critic. Evaluate the supplied
@@ -77,4 +80,3 @@ def generate_critique(screenplay: str, plan: ShotPlan) -> Critique:
             ),
         )
     return Critique.model_validate_json(response.text)
-

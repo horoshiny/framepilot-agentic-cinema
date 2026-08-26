@@ -37,7 +37,7 @@ class Critique(BaseModel):
 
 class DirectRequest(BaseModel):
     screenplay: str = Field(min_length=20, max_length=8000)
-    mood: str = Field(default="cinematic", max_length=100)
+    mood: str = Field(default="cinematic", max_length=500)
     image_data_url: str | None = None
 
 
