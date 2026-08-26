@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>FramePilot — Agentic Previsualisation</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <div><span class="mark">FP</span><strong>FramePilot</strong><small>AGENTIC PREVISUALISATION</small></div>
+    <span id="mode" class="pill">DEMO MODE</span>
+  </header>
+  <main>
+    <aside class="panel inputs">
+      <div class="eyebrow">01 · SOURCE</div>
+      <label>Screenplay excerpt</label>
+      <textarea id="screenplay">EXT. FOREST CABIN — NIGHT
+
+Mara raises the lantern. Beyond the trees, a door stands open although no one has entered. She takes one careful step forward. The flame bends toward the darkness.</textarea>
+      <label>Creative intent</label>
+      <input id="mood" value="uneasy anticipation">
+      <label class="upload">Storyboard image<input id="image" type="file" accept="image/png,image/jpeg,image/webp"><span>Choose image</span></label>
+      <button id="direct">DIRECT THIS SCENE</button>
+      <p class="hint">A bundled cinematic scene is used until you upload an image.</p>
+    </aside>
+
+    <section class="workspace">
+      <div class="toolbar"><span>SHOT 01</span><span id="time">00:00 / 00:08</span></div>
+      <div id="stage" class="stage">
+        <div class="sky layer"></div>
+        <div class="moon"></div>
+        <div class="cabin layer"><div class="door"></div></div>
+        <div class="figure layer"><div class="head"></div><div class="body"></div><div class="lantern"></div></div>
+        <div class="trees back layer"></div>
+        <div class="trees front layer"></div>
+        <div class="fog fog-a"></div><div class="fog fog-b"></div>
+        <div class="vignette"></div>
+        <div class="shadow-wipe"></div>
+      </div>
+      <div class="transport">
+        <button id="play" class="round">▶</button>
+        <div class="track"><div id="progress"></div></div>
+        <button id="version" class="secondary">FIRST PASS</button>
+      </div>
+      <div id="activity" class="activity"></div>
+    </section>
+
+    <aside class="panel direction">
+      <div class="tabs"><button class="active" data-tab="plan">DIRECTOR</button><button data-tab="critique">CRITIC</button></div>
+      <div id="planTab">
+        <div class="eyebrow">02 · SHOT PLAN</div>
+        <h2 id="intent">Uneasy anticipation</h2>
+        <p id="rationale">Generate a direction to reveal the agent's cinematic rationale.</p>
+        <div class="metric"><span>Camera</span><b id="camera">Slow push-in</b></div>
+        <label>Duration <output id="durationOut">8s</output></label><input id="duration" type="range" min="3" max="20" step=".5" value="8">
+        <label>Zoom <output id="zoomOut">1.16×</output></label><input id="zoom" type="range" min="1" max="1.35" step=".01" value="1.16">
+        <label>Parallax <output id="parallaxOut">46%</output></label><input id="parallax" type="range" min="0" max="1" step=".01" value=".46">
+        <label>Motion <output id="motionOut">38%</output></label><input id="motion" type="range" min="0" max="1" step=".01" value=".38">
+      </div>
+      <div id="critiqueTab" hidden>
+        <div class="eyebrow">03 · SELF-CRITIQUE</div>
+        <div id="scores" class="scores"></div>
+        <p id="diagnosis"></p>
+        <div class="revision"><strong>Proposed revision</strong><p id="revisionText"></p></div>
+        <button id="apply" disabled>APPLY REVISION</button>
+      </div>
+    </aside>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
+
