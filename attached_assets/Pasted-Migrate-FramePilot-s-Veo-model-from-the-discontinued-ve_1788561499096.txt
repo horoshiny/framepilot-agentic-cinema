@@ -1,0 +1,43 @@
+Migrate FramePilot’s Veo model from the discontinued `veo-3.0-generate-001` to `veo-3.1-generate-001`.
+
+Confirmed cause:
+
+* Google returned HTTP 404 `NOT_FOUND`.
+* `veo-3.0-generate-001` was discontinued after June 30, 2026.
+* Google’s recommended replacement is `veo-3.1-generate-001`.
+* `veo-3.1-generate-001` supports image-to-video, 8-second output, 16:9, video-only output, and `us-central1`.
+* The submitted image was valid JPEG data and non-empty.
+* The previous reservation was released; allowance remains 0 used / 1 remaining.
+
+Implement only the model migration and associated truthful UI/configuration updates:
+
+1. Change the production/default video model to `veo-3.1-generate-001`.
+2. Continue allowing `VEO_MODEL` to override the default.
+3. Remove all active references that claim the production model is `veo-3.0-generate-001`.
+4. Update approval UI, job metadata, diagnostics and tests to display the effective model dynamically.
+5. Do not hardcode the old ₹152.87 estimate. Use a model-specific configurable estimate or show a clearly labelled approximate Veo 3.1 estimate derived from the current billing price.
+6. Preserve:
+
+   * `us-central1`
+   * 8 seconds
+   * 16:9
+   * one output
+   * `generate_audio=False`
+   * `enhance_prompt=False`
+   * current storyboard image propagation
+   * bucket and prefix
+   * allowance limits
+   * reservation rollback
+   * no automatic retries
+7. Add a startup/pre-approval guard that rejects known retired model IDs before creating a reservation.
+8. Add offline tests proving:
+
+   * default model is `veo-3.1-generate-001`
+   * configured model appears consistently in approval, job metadata and provider submission
+   * retired `veo-3.0-generate-001` fails locally before provider invocation and before allowance reservation
+   * storyboard image remains attached
+   * failed submissions release reservations
+9. Run the complete mock-only suite and restart the workflow.
+10. Do not make any live Gemini, Vertex AI, Veo, or Cloud Storage request after the change.
+
+Report changed files, effective model, displayed estimate logic, test results and final allowance state.

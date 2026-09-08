@@ -1,0 +1,65 @@
+Implement Phase 2: the real Google Vertex AI Veo adapter behind a disabled-by-default kill switch.
+
+Use the previously approved migration plan and the Google SDK already selected during planning.
+
+Requirements:
+
+1. Preserve the fully working mocked video-job flow.
+
+2. Add a provider abstraction:
+   - MockVideoProvider
+   - VertexVeoProvider
+
+3. Select the provider only through configuration:
+   VIDEO_GENERATION_PROVIDER=mock | vertex
+   ALLOW_VEO_GENERATION=false by default
+
+4. Even when provider=vertex, reject generation unless:
+   - ALLOW_VEO_GENERATION is exactly "true";
+   - the user explicitly approved that exact job;
+   - no active duplicate exists;
+   - per-IP and global generation limits permit it.
+
+5. Implement real asynchronous Veo submission, operation polling, completion handling and video retrieval using the existing service-account authentication and explicit cloud-platform OAuth scope.
+
+6. Generalise prompts dynamically from each storyboard image, screenplay, creative intent and approved motion plan. Do not hard-code the observatory example.
+
+7. Preserve image identity and scene continuity in the generated prompt:
+   - characters and visible objects;
+   - environment and architecture;
+   - composition and lighting;
+   - requested subject, object and environmental movement;
+   - camera movement;
+   - prohibited additions and changes.
+
+8. Store no secret or service-account content in logs, responses, cache keys or client-side JavaScript.
+
+9. Add safe operation behavior:
+   - fixed polling interval with a strict deadline;
+   - no automatic retry;
+   - no resubmission after refresh;
+   - failed/expired jobs remain failed;
+   - cached completed results do not generate again;
+   - one active job per user;
+   - maximum one First Cut and one Director’s Cut per scene.
+
+10. Keep mock mode as the default for development and automated tests.
+
+11. Add mocked unit and integration tests for:
+   - request construction;
+   - image attachment;
+   - async operation polling;
+   - successful video retrieval;
+   - failure and timeout;
+   - kill switch;
+   - limits and duplicates;
+   - caching;
+   - credential secrecy;
+   - generalisation across at least three unrelated scene fixtures.
+
+12. Do not make a real Vertex or Veo request.
+13. Do not change any Replit Secret values.
+14. Do not enable ALLOW_VEO_GENERATION.
+15. Do not publish.
+
+Run the complete test suite, syntax checks and health check. Report the exact model configuration expected, changed files and results.

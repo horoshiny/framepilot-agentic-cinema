@@ -1,0 +1,11 @@
+- [Scene-grounded fallback](scene-grounding.md) — Generic evidence fields separate visual, screenplay, intent, unsupported, and conflict grounding.
+- [Mocked video boundary](mocked-video-generation.md) — Video jobs stay approval-gated, fixture-backed, process-local, and isolated from Motion Preview.
+- [Vertex output retrieval](vertex-output-retrieval.md) — Vertex Veo outputs use approved gs:// storage retrieval; Gemini file download is not a Vertex path.
+- [Vertex error diagnostics](vertex-error-diagnostics.md) — Google GenAI APIError exposes safe code/status/message fields; never log its full details or string.
+- [Vertex structured-output serialization](vertex-schema-serialization.md) — google-genai 2.20.0 can preserve snake_case aliases in Vertex schemas and inline media.
+- [Vertex storyboard submission guardrails](vertex-storyboard-guardrails.md) — Storyboard-to-video requires a validated session-bound image before allowance reservation.
+- [Veo model configuration](veo-model-configuration.md) — The active Veo model is overrideable, retired IDs fail before reservation, and cost copy must remain model-specific.
+- [Replacement First Cut credit](replacement-credit.md) — Job-scoped replacement credits are audited separately and excluded from normal global/per-IP usage.
+- [Motion confirmation source](motion-confirmation-source.md) — First Cut status and approval gating must read the nested motion plan confirmation field through one canonical accessor.
+- [First Cut pre-generation controls](first-cut-pre-generation-controls.md) — Keep approval and allowance controls outside the completed-output pane so a new First Cut remains reachable.
+- [Completed scene recovery](completed-scene-recovery.md) — Durable completed jobs must carry scene context or explicitly hide unrelated analysis state during legacy recovery.

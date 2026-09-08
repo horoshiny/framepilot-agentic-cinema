@@ -1,0 +1,60 @@
+Fix the motion-plan grounding generically for every scene. Do not generate a video, create an approval, reserve allowance or call any live Google model during implementation or testing.
+
+Important product requirement:
+
+FramePilot must independently identify characters, objects, environment and intended motion from the uploaded storyboard, screenplay and creative intent. Do not hardcode any observatory-specific entities, keywords, actions or output.
+
+Implement a general analysis pipeline that:
+
+1. Extracts entities and actions from the complete screenplay:
+
+   * characters;
+   * character actions;
+   * important objects and object actions;
+   * environmental elements and atmospheric motion;
+   * camera instructions;
+   * timing instructions;
+   * continuity requirements;
+   * prohibited changes.
+2. Grounds each result using separate evidence fields:
+
+   * `visual_evidence`
+   * `screenplay_evidence`
+   * `intent_evidence`
+   * `grounding_source`: `visual`, `screenplay`, `visual_and_screenplay`, or `unsupported`
+   * confidence
+3. A dark or low-contrast image must not erase clearly stated screenplay actions. Such actions should be labelled `screenplay` grounded, not visually confirmed.
+4. Unsupported actions may not be invented.
+5. Resolve pronouns and repeated references where possible, so actions remain attached to the correct character or object.
+6. Convert extracted actions into bounded cinematic instructions suitable for image-to-video generation.
+7. Preserve identity, composition, subject count, architecture, lighting and other continuity constraints inferred from the inputs.
+8. If image evidence conflicts with the screenplay, surface the conflict and require confirmation instead of silently choosing one.
+9. `confirmation_required` must explain the actual uncertainty. It must not automatically replace all semantic motion with camera-only motion.
+10. The structured motion arrays must contain the discovered actions and must be used to construct the final Veo prompt. Do not merely display or repeat the creative-intent text.
+11. The same pipeline must work for unrelated scenes, genres, characters and environments.
+12. Do not weaken the generation, credit, approval, duplicate, storage or session safeguards.
+
+Before implementing, inspect whether the existing Google/Vertex direction provider already supports structured multimodal image-and-screenplay analysis. Reuse it if available. Do not add another AI provider.
+
+Tests must use mocked model responses only and cover:
+
+* A dark storyboard with clearly stated screenplay actions: actions remain screenplay-grounded.
+* A bright storyboard with matching visual and screenplay evidence: actions become visual-and-screenplay grounded.
+* An action absent from all inputs: it is rejected as unsupported.
+* A conflict between image and screenplay: confirmation is required.
+* A completely unrelated second scene: entities and actions are discovered without any scene-specific code.
+* The structured actions reach the final mocked Veo prompt.
+* No test performs a real Gemini, Vertex AI, Veo or Cloud Storage call.
+* No approval, allowance or generation job is created during analysis tests.
+
+The observatory scene may be used as one test fixture only. Verify that its expected entities and motions are derived from the fixture inputs, with no production-code references to astronomer, lantern, portal, cloak, mist, ruins or floodwater.
+
+Run the full test suite and report:
+
+* exact files changed;
+* whether analysis is deterministic local parsing or mocked Google multimodal analysis;
+* the corrected structured output for both test scenes;
+* proof that production code contains no observatory-specific rules;
+* test results.
+
+Do not perform any live model or generation request.

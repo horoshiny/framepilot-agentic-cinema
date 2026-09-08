@@ -285,12 +285,17 @@ input:not([type="range"]) { padding: 11px 12px; }
 
 .workspace-header {
   min-height: 22px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+}
+.workspace-header > div:first-child {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 12px;
 }
 
-.workspace-header > div { gap: 12px; }
 .state-label { color: var(--slate); font-size: 10px; }
 .state-label[data-state="loading"] { color: var(--rust-dark); }
 .state-label[data-state="complete"] { color: var(--sage); }
@@ -316,6 +321,74 @@ input:not([type="range"]) { padding: 11px 12px; }
 .product-story span:first-child { padding-left: 0; border-left: 0; }
 .product-story span:nth-child(3) { color: var(--blue); }
 .product-story span:last-child { color: var(--rust-dark); }
+
+.workflow-stages {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-height: 22px;
+  margin: 0;
+  color: var(--slate);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.workflow-stage {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.workflow-stage b {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--slate);
+  font-size: 9px;
+}
+
+.workflow-stage.active { color: var(--rust-dark); font-weight: 700; }
+.workflow-stage.active b { border-color: var(--rust); color: var(--rust-dark); }
+.workflow-stage[data-state="complete"] { color: var(--sage); font-weight: 700; }
+.workflow-stage[data-state="complete"] b {
+  border-color: var(--sage);
+  background: var(--sage);
+  color: var(--paper);
+}
+
+.generation-details {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.generation-details-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.generation-details dl {
+  margin: 0;
+}
+.generation-details dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+.generation-details dt { color: var(--slate); }
+.generation-details dd {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 700;
+  text-align: right;
+}
 
 .stage {
   position: relative;
@@ -466,6 +539,67 @@ input:not([type="range"]) { padding: 11px 12px; }
 .video-card[data-optional="true"] .video-frame { display: none; }
 .video-card[data-optional="true"] .video-message { min-height: 0; margin-top: 5px; }
 
+.output-mode-switch {
+  display: inline-flex;
+  align-self: flex-end;
+  gap: 2px;
+  margin: 2px 0 8px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--paper);
+}
+
+.output-mode {
+  padding: 7px 11px;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--slate);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.output-mode.active { background: var(--rust); color: var(--paper); }
+.output-mode:not(:disabled):hover:not(.active) { background: var(--stone); }
+.output-pane { min-width: 0; }
+.first-cut-output { display: grid; gap: 12px; }
+.first-cut-request {
+  margin-top: 12px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  background: var(--paper);
+}
+.first-cut-request .video-message { min-height: 0; margin: 7px 0; }
+.first-cut-request button { width: 100%; padding: 9px; font-size: 10px; }
+.first-cut-player {
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--border);
+  background: var(--paper);
+}
+.first-cut-player .video-frame { width: 100%; aspect-ratio: 16 / 9; }
+.first-cut-actions { display: flex; gap: 8px; }
+.first-cut-actions button { flex: 1; padding: 9px; font-size: 10px; }
+.director-cut-card {
+  padding: 12px 13px;
+  border: 1px solid var(--border-light);
+  background: var(--paper);
+}
+.director-cut-card .video-message { min-height: 0; margin: 7px 0 0; }
+.first-cut-review {
+  padding: 12px 13px;
+  border: 1px solid var(--border-light);
+  background: var(--paper);
+}
+.first-cut-review > summary {
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+.first-cut-review[open] > summary { margin-bottom: 12px; }
+.first-cut-review .block-heading { margin-top: 3px; }
+
 .agent-progress {
   margin-top: auto;
   padding-top: 18px;
@@ -567,6 +701,39 @@ input:not([type="range"]) { padding: 11px 12px; }
   border-left: 1px solid var(--border);
   overflow: auto;
 }
+
+.scene-plan-content {
+  display: grid;
+  gap: 14px;
+  padding-bottom: 18px;
+}
+
+.plan-section {
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.plan-section:last-child { border-bottom: 0; }
+.plan-section-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.plan-section-head small { color: var(--blue); font-size: 9px; text-align: right; }
+.plan-section h3 { margin: 0 0 9px; color: var(--ink); font-size: 12px; }
+.plan-section > h3 { margin-top: 0; }
+.plan-section .rationale { margin-bottom: 13px; }
+.plan-details { margin-top: 10px; border-top: 1px solid var(--border-light); }
+.plan-details summary { padding: 10px 0; color: var(--ink); cursor: pointer; font-size: 10px; font-weight: 700; list-style: none; }
+.plan-details summary::-webkit-details-marker { display: none; }
+.plan-details summary::after { float: right; content: "⌄"; color: var(--rust); }
+.plan-details[open] summary::after { transform: rotate(180deg); }
+.plan-details > .tab-intro { margin: 0 0 10px; }
+.plan-candidates { display: grid; gap: 8px; }
+.plan-item { padding: 8px 9px; border-left: 2px solid var(--sage); background: #eee8de; }
+.plan-item-title b { color: var(--ink); font-size: 10px; }
+.plan-item > p { margin: 4px 0 0; color: var(--ink); font-size: 9px; line-height: 1.4; }
+.plan-item details { margin-top: 6px; }
+.plan-item summary { color: var(--sage); cursor: pointer; font-size: 9px; }
+.plan-item small { display: block; margin-top: 4px; color: var(--slate); font-size: 9px; line-height: 1.4; }
+.plan-empty { color: var(--slate); font-size: 10px; font-style: italic; }
+.scene-plan .routing-card { margin-top: 13px; }
 
 .inspector-header { justify-content: space-between; margin-bottom: 14px; }
 .inspector-shot { color: var(--slate); font-size: 10px; }

@@ -1,0 +1,57 @@
+Fix the disabled **Generate First Cut** button now. Do not perform another diagnosis-only pass.
+
+Current confirmed state:
+
+* Storyboard image: ready
+* Motion plan: present
+* Replacement authorization: 1 available
+* Normal allowance: exhausted
+* Model: `veo-3.1-generate-001`
+* No active First Cut job
+* User clicked `Use conservative plan`
+* Generate First Cut still remains disabled
+
+Implement these changes:
+
+1. Create one canonical boolean:
+   `conservativePlanConfirmed`
+2. When `Use conservative plan` is clicked:
+
+   * Set `conservativePlanConfirmed = true`
+   * Set the canonical motion plan’s `confirmation_required = false`
+   * Update every duplicate/restored plan reference to the same canonical object
+   * Save the recovery snapshot
+   * Rerender the motion plan
+   * Rerender all video states
+   * Re-fetch `/api/video-allowance`
+   * Rerender all video states again after that response
+3. The First Cut eligibility calculation must treat the user as eligible when:
+
+   * storyboard handle exists,
+   * motion plan exists,
+   * conservative confirmation is complete,
+   * health is loaded,
+   * provider is Vertex,
+   * model is valid,
+   * no active First Cut job exists,
+   * and either normal allowance remains **or** a matching replacement authorization is available.
+4. A historical failed First Cut must not count as active.
+5. Normal allowance exhaustion must not disable the button when replacement authorization is available.
+6. Remove any static HTML `disabled` attribute after JS confirms eligibility:
+   `generateFirstCutButton.disabled = !eligible`
+7. Display the exact disabled reason below the button. It must never remain silently disabled.
+8. Backend approval/job validation remains authoritative; do not weaken security checks.
+9. Add a browser regression test using this exact state:
+
+   * normal remaining = 0
+   * replacement remaining = 1
+   * storyboard ready
+   * motion plan present
+   * confirmation initially required
+   * click Use conservative plan
+   * Generate First Cut becomes enabled immediately
+10. Run the complete mock-only suite and restart the workflow once.
+
+Do not rerun Direct, upload another image, call Google services, create an approval/job, or consume the replacement attempt.
+
+Finish by reporting the final eligibility booleans and showing that `button.disabled === false`.

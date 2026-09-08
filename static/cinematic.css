@@ -1,22 +1,25 @@
-.uploaded-scene,.image-plane,.particles,.agent-fog,.light-bloom{position:absolute;inset:0}
-.uploaded-scene{overflow:hidden;background:#05070a}
-.image-plane{inset:-5%;background-position:center;background-size:cover;will-change:transform;transform:scale(1.06)}
-.image-back{filter:saturate(.86) brightness(.78);z-index:1}
-.image-mid{z-index:2;mask-image:linear-gradient(to bottom,transparent 0%,#000 24%,#000 78%,transparent 96%);-webkit-mask-image:linear-gradient(to bottom,transparent 0%,#000 24%,#000 78%,transparent 96%)}
-.image-front{z-index:3;filter:contrast(1.04);mask-image:linear-gradient(to bottom,transparent 0%,transparent 57%,#000 86%);-webkit-mask-image:linear-gradient(to bottom,transparent 0%,transparent 57%,#000 86%)}
+.uploaded-scene,.image-backing,.image-plane,.depth-debug-overlay,.particles,.agent-fog,.light-bloom{position:absolute;inset:0}
+.uploaded-scene{overflow:hidden;background:transparent}
+.image-plane{inset:0;background-color:transparent;background-position:center;background-size:cover;background-repeat:no-repeat;will-change:transform;transform-origin:center;transform:scale(1);backface-visibility:hidden;border:0;box-shadow:none;opacity:1;filter:none;mask-repeat:no-repeat;-webkit-mask-repeat:no-repeat;mask-position:center;-webkit-mask-position:center;mask-size:100% 100%;-webkit-mask-size:100% 100%;mask-mode:alpha;-webkit-mask-mode:alpha}
+.image-backing{inset:0;z-index:0;background-color:transparent;background-position:center;background-size:cover;background-repeat:no-repeat;filter:blur(9px);transform:scale(1.08);opacity:1;border:0;box-shadow:none;pointer-events:none}
+.image-back{z-index:1}
+.image-mid{z-index:2}
+.image-front{z-index:3}
+.depth-debug-overlay{z-index:7;display:none;pointer-events:none;background:transparent;opacity:1;border:0}
+.show-depth-debug .depth-debug-overlay{display:block}
 .particles{z-index:6;opacity:.9;pointer-events:none;width:100%;height:100%;mix-blend-mode:screen}
 .agent-fog{z-index:4;display:none;pointer-events:none;top:50%;height:45%;background:radial-gradient(ellipse at center,#c8d6da30,transparent 67%);filter:blur(15px);opacity:.55}
 .fog-far{top:30%;opacity:.24;transform:scale(1.25)}
 .light-bloom{z-index:5;display:none;pointer-events:none;background:radial-gradient(circle at 72% 35%,#ffc36b44,transparent 17%);mix-blend-mode:screen;opacity:.35}
 .has-upload .vignette{z-index:8}
-.has-upload.playing .image-back{animation:depth-back var(--duration,8s) cubic-bezier(.22,.61,.36,1) forwards}
-.has-upload.playing .image-mid{animation:depth-mid var(--duration,8s) cubic-bezier(.22,.61,.36,1) forwards}
-.has-upload.playing .image-front{animation:depth-front var(--duration,8s) cubic-bezier(.22,.61,.36,1) forwards}
+.has-upload.playing .image-back{animation:compositor-back var(--duration,8s) var(--back-easing,var(--compositor-easing,cubic-bezier(.22,.61,.36,1))) forwards}
+.has-upload.playing .image-mid{animation:compositor-mid var(--duration,8s) var(--mid-easing,var(--compositor-easing,cubic-bezier(.22,.61,.36,1))) forwards}
+.has-upload.playing .image-front{animation:compositor-front var(--duration,8s) var(--front-easing,var(--compositor-easing,cubic-bezier(.22,.61,.36,1))) forwards}
 .has-upload.fx-fog .agent-fog{display:block}.has-upload.playing.fx-fog .fog-near{animation:fog-near 9s ease-in-out infinite alternate}.has-upload.playing.fx-fog .fog-far{animation:fog-far 13s ease-in-out infinite alternate}
 .has-upload.fx-light_flicker .light-bloom{display:block}.has-upload.playing.fx-light_flicker .light-bloom{animation:bloom 1.7s ease-in-out infinite alternate}
-@keyframes depth-back{to{transform:translate(calc(var(--parallax,.45)*-8px),calc(var(--parallax,.45)*-2px)) scale(calc(var(--zoom,1.12)*1.02))}}
-@keyframes depth-mid{to{transform:translate(calc(var(--parallax,.45)*-18px),calc(var(--parallax,.45)*-4px)) scale(calc(var(--zoom,1.12)*1.045))}}
-@keyframes depth-front{to{transform:translate(calc(var(--parallax,.45)*-34px),calc(var(--parallax,.45)*-7px)) scale(calc(var(--zoom,1.12)*1.075))}}
+@keyframes compositor-back{from{transform:translate3d(var(--back-x-start,0px),var(--back-y-start,0px),0) scale(var(--back-scale-start,1.04))}to{transform:translate3d(var(--back-x-end,0px),var(--back-y-end,0px),0) scale(var(--back-scale-end,1.1))}}
+@keyframes compositor-mid{from{transform:translate3d(var(--mid-x-start,0px),var(--mid-y-start,0px),0) scale(var(--mid-scale-start,1.05))}to{transform:translate3d(var(--mid-x-end,0px),var(--mid-y-end,0px),0) scale(var(--mid-scale-end,1.12))}}
+@keyframes compositor-front{from{transform:translate3d(var(--front-x-start,0px),var(--front-y-start,0px),0) scale(var(--front-scale-start,1.06))}to{transform:translate3d(var(--front-x-end,0px),var(--front-y-end,0px),0) scale(var(--front-scale-end,1.16))}}
 @keyframes bloom{45%{opacity:.2}55%{opacity:.52}100%{opacity:.32}}
 @keyframes fog-near{to{transform:translateX(8%) scale(1.08)}}@keyframes fog-far{to{transform:translateX(-6%) scale(1.34)}}
-@media(prefers-reduced-motion:reduce){.particles,.agent-fog,.light-bloom{animation:none!important}}
+@media(prefers-reduced-motion:reduce){.particles,.agent-fog,.light-bloom,.image-plane{animation:none!important}}

@@ -1,0 +1,117 @@
+Do not merge yet. The layout is approved, but the completed observatory First Cut is currently displayed beside unrelated bundled demo state:
+
+* Screenplay says `EXT. FOREST CABIN — NIGHT`
+* Creative intent says `uneasy anticipation`
+* Scene Plan shows unrelated direction
+* Header says `READY TO DIRECT`
+* Step 1 is highlighted
+* Timer shows `00:00 / 00:00`
+
+This is inconsistent with the completed eight-second observatory video and would confuse judges.
+
+Fix only the restored completed-job presentation. Do not change the approved layout.
+
+Do not call Direct, Gemini, Vertex AI, Veo, `operations.get` or Cloud Storage. Do not generate another video or change allowance records.
+
+First inspect the existing durable job, approval metadata, session recovery data and stored scene linkage for:
+
+`video-2eed1d13ff0842f8aafa095ee12536fc`
+
+Use existing stored data where available. Do not expose prompts or private data in logs.
+
+The correct screenplay associated with this completed First Cut is:
+
+EXT. FLOODED CELESTIAL OBSERVATORY — BLUE HOUR
+
+A cloaked astronomer stands on a circular stone platform above still floodwater. A massive brass astrolabe frames the foreground. Beyond the ruined towers, a luminous celestial portal hangs in the sky.
+
+The astronomer slowly raises an amber lantern from waist to shoulder height, keeping both feet planted. A breeze lifts the cloak’s hem.
+
+Mist drifts between the ruins. The portal’s concentric rings turn slowly, releasing one gentle pulse of light. Small ripples carry its reflection across the water.
+
+The astronomer holds the lantern steady as the light fades.
+
+The correct creative intent is:
+
+Create quiet, majestic awe in one continuous shot. Prioritise the astronomer slowly raising the lantern, feet planted. Add gentle cloak movement, drifting mist and subtle water ripples. Turn the portal rings slowly; delay one soft pulse until the final third. Slide the camera slightly right with a restrained push-in. Preserve identity, architecture and blue-hour lighting. No cuts, new subjects or abrupt motion.
+
+Requirements:
+
+1. Scene-consistent recovery
+
+When restoring a completed First Cut, restore its associated scene snapshot and Scene Plan if safely persisted.
+
+Never combine:
+
+* A completed output from one source signature
+* Inputs or Scene Plan from another source signature
+
+Future video jobs must retain a session-safe reference to the exact scene snapshot used for generation.
+
+Do not expose another client’s scene or job.
+
+2. Legacy completed job
+
+For this exact existing legacy job, search existing local durable/session records for its matching:
+
+* Screenplay
+* Creative intent
+* Storyboard handle
+* Motion plan
+* Source signature
+
+If the exact stored scene snapshot exists, restore it.
+
+If it does not exist, do not display the unrelated forest-cabin demo state. Instead:
+
+* Display the completed First Cut in a clearly labelled `Recovered completed scene` view.
+* Hide unrelated screenplay, intent and Scene Plan values while this recovered output is selected.
+* Do not fabricate an analysis result.
+
+Do not hardcode the observatory content as a global default for other users or jobs.
+
+3. Correct completed state
+
+When this video is selected:
+
+* Heading: `First Cut`
+* Status: `COMPLETED`
+* Stage 3 `First Cut` must be highlighted.
+* Stages 1 and 2 should appear completed.
+* Remove `READY TO DIRECT`.
+* Show `Vertex AI Veo · veo-3.1-generate-001 · 8-second First Cut`.
+* Read the native video duration and show approximately `00:00 / 00:08`.
+* Keep the completed video playable after refresh.
+
+4. Switching to a new scene
+
+When the user chooses to begin a new scene:
+
+* Switch back to `Direct Scene`.
+* Show blank or bundled input state only in that new-scene mode.
+* Do not remove, overwrite or hide the durable completed First Cut permanently.
+* The completed First Cut must remain recoverable through the First Cut stage.
+
+5. Regression tests
+
+Add mocked coverage proving:
+
+* A completed output never appears beside a different source signature’s screenplay, intent or Scene Plan.
+* Restoring the completed job activates Stage 3.
+* The completed state does not say `READY TO DIRECT`.
+* The displayed duration comes from the video metadata.
+* A new-scene view does not overwrite the completed durable output.
+* Refresh restores the same completed First Cut.
+* No provider or generation call occurs.
+
+Run the full mock-only suite and perform one read-only live verification using the already recovered local video endpoint.
+
+Provide:
+
+* Screenshot showing the completed observatory First Cut with consistent restored scene state
+* Screenshot showing Stage 3 active and the eight-second duration
+* Test result
+* Browser-console result
+* Updated cleanup-branch commit hash
+
+Do not merge or push until I approve the corrected screenshot.

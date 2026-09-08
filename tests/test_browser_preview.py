@@ -16,6 +16,11 @@ from cinema_agent.demo import demo_critique, demo_plan
 FIXTURE = Path(__file__).parent / "fixtures" / "storyboard.svg"
 BASE_URL = os.getenv("FRAMEPILOT_BASE_URL", "http://127.0.0.1:5000")
 SCREENPLAY = "A figure crosses the empty platform while the signal changes and rain gathers on the glass."
+OBSERVATORY_SCREENPLAY = """EXT. FLOODED CELESTIAL OBSERVATORY — BLUE HOUR
+
+A cloaked astronomer stands on a circular stone platform above still floodwater. A massive brass astrolabe frames the foreground. Beyond the ruined towers, a luminous celestial portal hangs in the sky.
+
+The astronomer slowly raises an amber lantern from waist to shoulder height, keeping both feet planted. A breeze lifts the cloak’s hem. Mist drifts between the ruins. The portal’s concentric rings turn slowly, releasing one gentle pulse of light. Small ripples carry its reflection across the water. The astronomer holds the lantern steady as the light fades."""
 
 
 def direction_payload(*, provider="vertex"):
@@ -83,6 +88,7 @@ def video_job_payload(
     kind="first_cut",
     revision_approved=False,
     output_url=None,
+    scene_snapshot=None,
 ):
     completed = status == "completed"
     return {
@@ -118,6 +124,7 @@ def video_job_payload(
         "revision_approved": revision_approved,
         "deduplicated": False,
         "replacement_for_job_id": None,
+        **({"scene_snapshot": scene_snapshot} if scene_snapshot else {}),
     }
 
 
@@ -283,19 +290,22 @@ def test_completed_durable_first_cut_restores_without_generation_and_compacts_di
             assert page.locator("#firstCutVideo").is_visible()
             assert page.locator("#firstCutVideo").get_attribute("src").startswith(real_url)
             assert page.locator("#firstCutProviderLabel").inner_text() == (
-                "Vertex AI Veo · veo-3.1-generate-001 · 8-second First Cut"
+                "Vertex AI Veo · veo-3.1-generate-001 · 8 seconds"
             )
+            assert page.locator("#workflowFirstCut").get_attribute("data-state") == "active"
+            assert page.locator("#firstCutOutput").inner_text() == "Generated Video"
+            assert page.locator("#generationDetailsPanel").is_visible()
+            assert page.locator("#generationDetailDuration").inner_text() == "8 seconds"
+            assert page.locator(".first-cut-player .video-kicker").count() == 0
+            assert page.locator("#analyseFirstCut").inner_text() == "Review Generated Video"
             assert page.locator("#generateFirstCut").is_hidden()
             assert page.locator("#analyseFirstCut").is_enabled()
             assert page.locator("#videoAllowanceMessage").is_hidden()
-            assert page.locator("#directorCutStatus").inner_text() == "OPTIONAL — NOT GENERATED"
-            assert page.locator("#directorCutMessage").inner_text() == (
-                "A revised cut can be generated after First Cut critique "
-                "when additional Veo allowance is available."
-            )
-            assert page.locator("#directorCutVideo").is_hidden()
-            assert page.locator("#generateDirectorCut").is_hidden()
-            assert page.locator("#generateDirectorCut").is_disabled()
+            assert page.locator("#directorCutStatus").inner_text() == "Director’s Cut — Optional"
+            assert page.locator("#directorCutMessage").inner_text() == "Unavailable in this demo"
+            assert page.locator("#directorCutCard").is_visible()
+            assert page.locator("#directorCutVideo").count() == 0
+            assert page.locator("#generateDirectorCut").count() == 0
             assert not any(
                 method == "POST"
                 and any(path in url for path in ("/api/direct", "/api/video-jobs"))
@@ -344,13 +354,152 @@ def test_completed_durable_first_cut_wins_over_deterministic_fallback_snapshot()
             page.wait_for_function(
                 "document.querySelector('#firstCutStatus')?.innerText === 'COMPLETED'"
             )
-            assert page.locator("#analysisSource").inner_text() == "Deterministic fallback"
+            assert page.locator("#analysisSource").is_hidden()
+            assert page.locator("#generationDetailsPanel").is_visible()
+            assert page.locator("#generationDetailsPanel").inner_text().find("Generation Details") >= 0
+            assert page.locator("#scenePlanContent").is_hidden()
             assert page.locator("#firstCutVideo").is_visible()
             assert not any(
                 method == "POST"
                 and any(path in url for path in ("/api/direct", "/api/video-jobs"))
                 for method, url in requests
             )
+        finally:
+            browser.close()
+
+
+def test_simplified_three_stage_workflow_switches_between_motion_and_first_cut():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser preview regression test.")
+
+    latest = video_job_payload(
+        provider="vertex",
+        job_id="video-three-stage",
+        output_url="/api/video-jobs/video-three-stage/video",
+        scene_snapshot={
+            "scene_key": "scene-test",
+            "source_signature": "source-test",
+            "screenplay": SCREENPLAY,
+            "creative_intent": "rising dread",
+            "direction_response": direction_payload(provider="vertex"),
+        },
+    )
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        try:
+            mock_video_api(page, provider="vertex", latest_job=latest)
+            page.goto(BASE_URL, wait_until="networkidle")
+            assert page.locator(".workflow-stage").count() == 3
+            assert [
+                " ".join(text.split())
+                for text in page.locator(".workflow-stage").all_inner_texts()
+            ] == ["1 Direct Scene", "2 Motion Preview", "3 First Cut"]
+            assert page.locator(".product-story").count() == 0
+            assert page.locator(".tabs").count() == 0
+            assert page.locator("[data-tab]").count() == 0
+            assert page.locator(".agent-progress").count() == 0
+            assert page.locator("#howWorks").count() == 0
+            assert page.locator(".about-line").count() == 0
+            assert page.locator("#mode").inner_text() == "Vertex AI connected"
+            assert page.locator("#generationDetailsPanel").is_visible()
+
+            page.wait_for_function(
+                "document.querySelector('#firstCutStatus')?.innerText === 'COMPLETED'"
+            )
+            assert page.locator("#firstCutOutput").get_attribute("aria-selected") == "true"
+            assert page.locator("#workflowFirstCut").get_attribute("data-state") == "active"
+            assert page.locator("#firstCutOutput").inner_text() == "Generated Video"
+            assert page.locator("#firstCutOutputPane").is_visible()
+            assert page.locator("#motionPreviewOutputPane").is_hidden()
+
+            page.click("#motionPreviewOutput")
+            assert page.locator("#motionPreviewOutput").get_attribute("aria-selected") == "true"
+            assert page.locator("#motionPreviewOutput").get_attribute("aria-selected") == "true"
+            assert page.locator("#motionPreviewOutputPane").is_visible()
+            assert page.locator("#firstCutOutputPane").is_hidden()
+            assert page.locator(".scene-plan").inner_text().find("Creative Direction") >= 0
+            assert page.locator("#charactersSection").count() == 1
+            assert page.locator("#objectsSection").count() == 1
+            assert page.locator("#environmentSection").count() == 1
+            assert page.locator("#motionPlan h3").inner_text() == "Camera & Motion"
+            assert "Evidence & Limits" in page.locator(".scene-plan").inner_text()
+
+            page.click("#firstCutOutput")
+            assert page.locator("#firstCutOutput").get_attribute("aria-selected") == "true"
+            assert page.locator("#firstCutVideo").is_visible()
+            assert page.locator("#analyseFirstCut").inner_text() == "Review Generated Video"
+        finally:
+            browser.close()
+
+
+def test_completed_recovery_restores_scene_consistency_and_survives_new_scene():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the completed recovery test.")
+
+    latest = video_job_payload(
+        provider="vertex",
+        job_id="video-observatory",
+        output_url="/static/demo-generation.mp4",
+        scene_snapshot={
+            "scene_key": "scene-observatory",
+            "source_signature": "source-observatory",
+            "screenplay": OBSERVATORY_SCREENPLAY,
+            "creative_intent": (
+                "Create quiet, majestic awe in one continuous shot. Prioritise the "
+                "astronomer slowly raising the lantern, feet planted."
+            ),
+        },
+    )
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        requests = []
+        page.on("request", lambda request: requests.append((request.method, request.url)))
+        try:
+            mock_video_api(page, provider="vertex", latest_job=latest)
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.wait_for_function(
+                "document.querySelector('#firstCutStatus')?.innerText === 'COMPLETED'"
+            )
+            page.wait_for_function(
+                "document.querySelector('#time')?.innerText === '00:00 / 00:02'"
+            )
+            assert page.locator("#screenplay").input_value() == OBSERVATORY_SCREENPLAY
+            assert page.locator("#mood").input_value().startswith("Create quiet, majestic awe")
+            assert page.locator("#generationDetailsPanel").is_visible()
+            assert page.locator("#generationDetailStatus").inner_text() == "Completed"
+            assert page.locator("#generationDetailProvider").inner_text() == "Vertex AI Veo"
+            assert page.locator("#generationDetailModel").inner_text() == "veo-3.1-generate-001"
+            assert page.locator("#generationDetailDuration").inner_text() == "2 seconds"
+            assert page.locator("#scenePlanContent").is_hidden()
+            assert page.locator("#workflowFirstCut").get_attribute("data-state") == "active"
+            assert page.locator("#stateLabel").inner_text() == "GENERATED VIDEO READY"
+            assert page.locator("#workflowDirect").get_attribute("data-state") == "complete"
+            assert page.locator("#workflowMotion").get_attribute("data-state") == "complete"
+            assert page.locator("#workflowFirstCut").get_attribute("data-state") == "active"
+            assert "READY TO DIRECT" not in page.locator("body").inner_text()
+
+            page.click("#direct")
+            page.wait_for_function(
+                "document.querySelector('#stage')?.dataset.state === 'completed'"
+            )
+            assert page.locator("#motionPreviewOutput").get_attribute("aria-selected") == "true"
+            assert page.locator("#firstCutOutput").is_hidden()
+            assert not any(
+                method == "POST" and "/api/video-jobs" in url
+                for method, url in requests
+            )
+
+            page.reload(wait_until="networkidle")
+            page.wait_for_function(
+                "document.querySelector('#firstCutStatus')?.innerText === 'COMPLETED'"
+            )
+            assert page.locator("#screenplay").input_value() == OBSERVATORY_SCREENPLAY
+            assert page.locator("#firstCutOutput").get_attribute("aria-selected") == "true"
+            assert page.locator("#workflowFirstCut").get_attribute("data-state") == "active"
         finally:
             browser.close()
 
@@ -407,8 +556,6 @@ def test_uploaded_preview_is_loaded_without_an_empty_stage_overlay():
             assert metrics["planeOpacity"] == "1"
             assert metrics["coveringOverlayDisplay"] == "none"
 
-            page.click('[data-tab="depth"]')
-            page.click('[data-tab="direction"]')
             assert page.get_attribute("#stage", "data-state") == "image-ready"
             assert page.locator("#stageState").evaluate(
                 "element => getComputedStyle(element).display"
@@ -419,11 +566,15 @@ def test_uploaded_preview_is_loaded_without_an_empty_stage_overlay():
                 """() => {
                     const panel = document.querySelector('#motionPlan');
                     return panel?.hidden === false
-                        && document.querySelector('#motionCandidates')?.textContent;
+                        && document.querySelector('#charactersPlan')?.textContent;
                 }"""
             )
             assert page.locator("#motionPlanStatus").inner_text() == "CONFIRMATION NEEDED"
             assert "Preserve" in page.locator("#motionPlan").inner_text()
+            assert "Main Characters" in page.locator(".scene-plan").inner_text()
+            assert "Objects" in page.locator(".scene-plan").inner_text()
+            assert "Environment" in page.locator(".scene-plan").inner_text()
+            assert "Camera & Motion" in page.locator(".scene-plan").inner_text()
             assert page.get_attribute("#stage", "data-state") == "completed"
         finally:
             browser.close()
@@ -444,7 +595,7 @@ def test_mocked_video_flow_keeps_cuts_separate_and_requires_revision_approval():
             page.wait_for_function("document.querySelector('#stage')?.dataset.state === 'completed'")
             page.click("#confirmMotion")
             assert page.locator("#generateFirstCut").is_enabled()
-            assert page.locator("#generateDirectorCut").is_disabled()
+            assert page.locator("#directorCutCard").is_hidden()
 
             page.click("#generateFirstCut")
             page.wait_for_function("document.querySelector('#videoApprovalDialog')?.open === true")
@@ -459,24 +610,18 @@ def test_mocked_video_flow_keeps_cuts_separate_and_requires_revision_approval():
             assert page.locator("#firstCutVideo").is_visible()
             assert "Demo generation" in page.locator("#firstCutMessage").inner_text()
             assert page.locator("#approveRevision").is_enabled()
-            assert page.locator("#generateDirectorCut").is_disabled()
+            assert page.locator("#directorCutCard").is_visible()
+            assert page.locator("#directorCutStatus").inner_text() == "Director’s Cut — Optional"
 
+            page.click("#motionPreviewOutput")
+            page.locator("#planReview").evaluate("element => { element.open = true; }")
             page.click("#approveRevision")
-            page.wait_for_function("document.querySelector('#generateDirectorCut')?.disabled === false")
-            page.click("#generateDirectorCut")
-            page.wait_for_function("document.querySelector('#videoApprovalDialog')?.open === true")
-            assert "Director’s Cut" in page.locator("#videoApprovalCopy").inner_text()
-            page.click("#confirmVideoApproval")
-            page.wait_for_function(
-                "document.querySelector('#directorCutStatus')?.innerText === 'COMPLETED'",
-                timeout=10000,
-            )
-            assert page.locator("#directorCutVideo").is_visible()
             first_src = page.locator("#firstCutVideo").get_attribute("src")
-            director_src = page.locator("#directorCutVideo").get_attribute("src")
             assert "/static/demo-generation.mp4" in first_src
-            assert "/static/demo-generation.mp4" in director_src
-            assert first_src != director_src
+            assert page.locator("#directorCutVideo").count() == 0
+            assert page.locator("#generateDirectorCut").count() == 0
+            assert page.locator("#firstCutOutput").is_visible()
+            assert page.locator("#firstCutOutput").get_attribute("aria-selected") == "true"
             assert page.locator("#stage video").count() == 0
         finally:
             browser.close()
@@ -828,8 +973,8 @@ def test_vertex_generate_with_veo_uses_explicit_approval_and_no_cancel_submissio
             page.wait_for_function("document.querySelector('#stage')?.dataset.state === 'completed'")
             page.click("#confirmMotion")
 
-            assert page.locator("#mode").inner_text().lower() == "vertex mode"
-            assert page.locator("#videoProviderLabel").inner_text().lower() == "vertex ai veo"
+            assert page.locator("#mode").inner_text().lower() == "vertex ai connected"
+            assert page.locator("#firstCutRequestProviderLabel").inner_text().lower() == "vertex ai veo"
             assert page.locator("#generateVeo").is_enabled()
             assert page.locator("#generateFirstCut").is_enabled()
 
@@ -873,8 +1018,8 @@ def test_mock_health_retains_demo_only_video_copy():
         try:
             mock_video_api(page, provider="mock")
             page.goto(BASE_URL, wait_until="networkidle")
-            assert page.locator("#videoProviderLabel").inner_text().lower() == "demo generation only"
-            assert "bundled fixture" in page.locator("#videoIntro").inner_text()
+            assert page.locator("#firstCutRequestProviderLabel").inner_text().lower() == "demo generation"
+            assert "Optional generative output" in page.locator("#firstCutRequest").inner_text()
             assert page.locator("#firstCutProviderLabel").inner_text() == "Demo generation"
         finally:
             browser.close()
@@ -900,15 +1045,15 @@ def test_delayed_vertex_health_never_exposes_demo_provider_copy():
             page.route("**/api/health", delayed_health)
             page.goto(BASE_URL, wait_until="commit")
             page.wait_for_function(
-                """() => document.querySelector('#mode')?.innerText === 'Checking environment…'
-                    && document.querySelector('#videoProviderLabel')?.innerText
+                """() => document.querySelector('#mode')?.innerText === 'Checking provider…'
+                    && document.querySelector('#firstCutRequestProviderLabel')?.innerText
                       ?.toLowerCase() === 'checking provider…'""",
                 timeout=1000,
             )
             page.wait_for_function(
-                "document.querySelector('#mode')?.innerText === 'Vertex mode'"
+                "document.querySelector('#mode')?.innerText === 'Vertex AI connected'"
             )
-            assert page.locator("#videoProviderLabel").inner_text().lower() == "vertex ai veo"
+            assert page.locator("#firstCutRequestProviderLabel").inner_text().lower() == "vertex ai veo"
         finally:
             browser.close()
 
@@ -946,13 +1091,10 @@ def test_vertex_health_with_deterministic_fallback_is_labeled_without_provider_d
             page.wait_for_function(
                 "document.querySelector('#stage')?.dataset.state === 'completed'"
             )
-            assert page.locator("#mode").inner_text().lower() == "vertex mode"
-            assert page.locator("#videoProviderLabel").inner_text().lower() == "vertex ai veo"
+            assert page.locator("#mode").inner_text().lower() == "vertex ai connected"
+            assert page.locator("#firstCutRequestProviderLabel").inner_text().lower() == "vertex ai veo"
             assert page.locator("#analysisSource").inner_text() == "Deterministic fallback"
-            assert (
-                "Vertex response failed local validation"
-                in page.locator("#progressSummary").inner_text()
-            )
+            assert page.locator("#progressSummary").count() == 0
         finally:
             browser.close()
 

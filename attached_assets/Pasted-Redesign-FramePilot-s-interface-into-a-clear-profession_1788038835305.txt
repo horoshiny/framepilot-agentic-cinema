@@ -1,0 +1,21 @@
+Redesign FramePilot’s interface into a clear professional cinematic workspace. Do not change backend logic, Vertex behavior, prompts, schemas, caching, routing, rate limits or cost controls.
+
+Replace the current dense three-column dashboard with:
+
+1. A slim top bar containing FramePilot, project status, Vertex/Demo mode and request/cache status.
+2. A collapsible left Scene Brief panel containing storyboard upload, screenplay and creative intent. Use clear field labels, comfortable spacing and one primary “Direct Scene” button.
+3. A dominant central Stage containing the image/video preview, playback control and clean First Pass / Director’s Cut selector.
+4. A compact right Inspector with tabs:
+   - Direction: emotional intent, camera grammar and short rationale;
+   - Depth: image-aware/heuristic status, three plane strengths and optional depth-region toggle;
+   - Critique: scores, concise critique and revision changes.
+5. A single horizontal agent progress strip below the Stage:
+   Analyse → Route → Direct → Animate → Critique → Revise.
+   Show one short decision per stage through tooltip or expandable detail rather than permanent paragraphs.
+6. Hide duration, zoom, parallax and motion sliders inside a collapsible “Fine-tune motion” section.
+7. Replace oversized generated headings with compact, readable hierarchy. Reduce all-caps usage. Preserve the charcoal, warm ivory and amber identity, but make it feel like professional film software rather than a generic AI dashboard.
+8. Add clear empty, loading, error, cached, rate-limited and completed states.
+9. Keep desktop judging view excellent at 1366×768 and 1920×1080, with no overlapping, horizontal page scrolling or clipped controls.
+10. Preserve the optional depth-region debug overlay as off by default.
+
+Use semantic HTML, accessible tabs/buttons, visible keyboard focus and responsive CSS. Do not add frameworks or external services. Add/update frontend tests and run the complete test suite without making a real Vertex call.

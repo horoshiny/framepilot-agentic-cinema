@@ -1,0 +1,100 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "DIa2K-6om17gIB6oWVMB-"
+uri = "file://screenshots/cleanup-final.jpg"
+type = "image"
+title = "FramePilot cleanup final layout"
+description = "Full-page capture of the simplified three-stage FramePilot workspace."
+logical_id = "6755b8d5-23e9-425c-89ea-15c057f566b9"
+content_hash = "sha256:00d363ba8703c5b0153fd0921143246b9ca2dc36f9077ce2ccbf40ba6162d107"
+size = 73104
+mtime_ms = 1788894534644
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:466d516e-9b9e-4311-958e-e52c4ff41069/6755b8d5-23e9-425c-89ea-15c057f566b9/9936b545-7aea-48ea-9998-8c15ceb4731e"
+storage_version_token = "1788894616063480"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "BK6o6BhtT6P_cw328Gk-9"
+uri = "file://screenshots/first-cut-playing.png"
+type = "image"
+title = "FramePilot completed First Cut"
+description = "Completed First Cut restored in the center workspace with native controls and active playback."
+logical_id = "5337c782-ae3c-4cca-adce-b7dd98c0d251"
+content_hash = "sha256:2857464a1e21d019208909979bb702e59eaeac493b1b569c907340b434cf2070"
+size = 127922
+mtime_ms = 1788894571579
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:466d516e-9b9e-4311-958e-e52c4ff41069/5337c782-ae3c-4cca-adce-b7dd98c0d251/8d0a574c-d82a-4d39-b264-70354b69eb1a"
+storage_version_token = "1788894617466775"
+content_type = "image/png"
+
+[[outputs]]
+id = "xz6epHygc3Ts63KljxGqG"
+uri = "file://screenshots/final-clean-no-progress.png"
+type = "image"
+title = "Final clean FramePilot layout"
+description = "Full-page screenshot with the redundant Agent progress strip and development copy removed."
+logical_id = "c7957ecb-0754-42d2-ac62-a0c79ca7d8e5"
+content_hash = "sha256:151c6f13dd36660a6fb0618ba6f6bfa21644c87150b4bab961b0f902b38651b8"
+size = 120989
+mtime_ms = 1788895571011
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:466d516e-9b9e-4311-958e-e52c4ff41069/c7957ecb-0754-42d2-ac62-a0c79ca7d8e5/70c34595-f5c4-481b-983e-71e1cd493c5e"
+storage_version_token = "1788895704245726"
+content_type = "image/png"
+
+[[outputs]]
+id = "vDhpfdCq8BxpkC2yuPP-J"
+uri = "file://screenshots/real-first-cut-playing.png"
+type = "image"
+title = "Real recovered First Cut playing"
+description = "Read-only session-owned recovery of the specified durable First Cut, playing in the native video UI."
+logical_id = "e3d44754-4420-428f-910c-8edd2abf80a2"
+content_hash = "sha256:642e4cec85a74fbea8340cac536162a42e39fd487ec62b64c1cdf3434de1eb7b"
+size = 562127
+mtime_ms = 1788895536683
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:466d516e-9b9e-4311-958e-e52c4ff41069/e3d44754-4420-428f-910c-8edd2abf80a2/d837d36e-78d6-4334-97d8-fab0ea5a6af4"
+storage_version_token = "1788895705544845"
+content_type = "image/png"
+
+[[outputs]]
+id = "u-EB1cLLiEXLng6kbboAR"
+uri = "file://screenshots/real-observatory-first-cut-playing.png"
+type = "image"
+title = "Corrected observatory First Cut"
+description = "Read-only session-owned recovery showing the observatory screenplay and intent, Stage 3 active, completed status, hidden unrelated Scene Plan values, and the native 8-second video playing."
+logical_id = "61f4bcbe-f3dc-4bf4-8c66-eb0b12dba5e4"
+content_hash = "sha256:c59f36c6eb1732ad6bc897f1e888e05ba4d12cd2e7c1ff952aed6e897d6fdbee"
+size = 537960
+mtime_ms = 1788896506250
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:466d516e-9b9e-4311-958e-e52c4ff41069/61f4bcbe-f3dc-4bf4-8c66-eb0b12dba5e4/6d2ae301-2a37-4d87-834e-e4ba07c81bec"
+storage_version_token = "1788896590030781"
+content_type = "image/png"
+
+[[outputs]]
+id = "FMzYIbd4Yssy_jWcB93Bm"
+uri = "file://screenshots/final-generated-scene.png"
+type = "image"
+title = "Final Generated Scene view"
+description = "Live recovered completed-video view with the editorial Generated Scene heading, Generated Video switch, clean Generation Details panel, and native 8-second playback."
+logical_id = "0441f734-2cf8-48f4-817f-d3852cc60993"
+content_hash = "sha256:bff7e043add591220f4592f9cc916be6ac42e41f343537fabfebb725f85d1444"
+size = 542953
+mtime_ms = 1788897782039
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:466d516e-9b9e-4311-958e-e52c4ff41069/0441f734-2cf8-48f4-817f-d3852cc60993/8bf82dee-a01f-411d-9462-10db15ce55a4"
+storage_version_token = "1788897849589902"
+content_type = "image/png"
+
+[[outputs]]
+id = "ZRUVbUCalqkIxK7V2ylZJ"
+uri = "file://screenshots/final-compact-generated-video.png"
+type = "image"
+title = "Final compact generated-video view"
+description = "Live recovered completed-video view with no large heading, a single compact header row, and the generated video kept as the strongest visual element."
+logical_id = "ad8e5fdc-c69d-4459-868f-9584dfa937ee"
+content_hash = "sha256:2722a58c42d9efbfb690947b6eec33d33f048e4cd6b5a51c2647eaa490ed6873"
+size = 535868
+mtime_ms = 1788898203938
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:466d516e-9b9e-4311-958e-e52c4ff41069/ad8e5fdc-c69d-4459-868f-9584dfa937ee/b946b073-804a-4992-8e7f-580d2805a630"
+storage_version_token = "1788898264961845"
+content_type = "image/png"

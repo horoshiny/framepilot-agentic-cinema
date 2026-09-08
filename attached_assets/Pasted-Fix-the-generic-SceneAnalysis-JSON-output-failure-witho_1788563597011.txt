@@ -1,0 +1,62 @@
+Fix the generic `SceneAnalysis` JSON-output failure without using provider-side structured schemas.
+
+Known constraints:
+
+* `response_schema` and `response_json_schema` previously produced Google `400 INVALID_ARGUMENT`.
+* The working provider configuration is `response_mime_type="application/json"` with local Pydantic validation.
+* The newest request succeeded at Google but failed locally with `json_invalid`.
+* Do not add image-specific labels, object names, character rules or keyword-based corrections.
+
+First inspect the current code and confirm:
+
+1. `response_mime_type="application/json"` is still set.
+2. Both `response_schema` and `response_json_schema` are absent.
+3. The effective `max_output_tokens`.
+4. Whether the expanded semantic contract has become excessively long or internally contradictory.
+
+Add payload-free diagnostics for future JSON failures:
+
+* candidate count
+* finish reason
+* response text length
+* whether trimmed text starts with `{`
+* whether it ends with `}`
+* whether markdown fences are present
+* whether the response is empty
+
+Never log the response text, entity values, screenplay, prompt, image bytes or credentials.
+
+Then implement the smallest generic correction:
+
+1. Keep JSON MIME mode and no provider schema.
+2. Keep `SceneAnalysis` compact. Gemini should return semantic observations only—not the verbose final `ShotPlan`.
+3. Remove duplicated instructions and long prose from the output contract.
+4. Specify every compact field’s JSON type clearly.
+5. Use stable entity IDs and references, but keep relationship records minimal:
+
+   * source entity ID
+   * relation type
+   * target entity ID
+   * action
+6. Require one JSON object with no markdown or surrounding prose.
+7. Set a sufficient explicit output-token budget for the compact response.
+8. Preserve strict `SceneAnalysis.model_validate_json()` validation.
+9. Do not silently accept arbitrary prose or malformed JSON.
+10. If the response is enclosed only in one standard JSON markdown fence, optionally strip that fence deterministically before validation. Do not extract JSON from arbitrary surrounding prose.
+11. Do not retry the Gemini request automatically.
+12. A malformed individual semantic candidate discovered after JSON parsing should be excluded with a conflict record rather than discarding otherwise valid candidates.
+13. Keep semantic recognition model-driven and applicable to arbitrary images.
+
+Add offline mocked tests for:
+
+* valid plain JSON
+* fenced JSON
+* truncated JSON
+* empty response
+* surrounding prose
+* token-limit finish reason
+* arbitrary characters, objects, environments and relationships
+* no provider-side schema fields
+* no raw model output in logs
+
+Run the complete mock-only suite and restart the workflow. Do not make any live Gemini, Vertex AI, Veo or Cloud Storage request afterward. Report the effective JSON configuration, compact contract shape, test results and allowance state.

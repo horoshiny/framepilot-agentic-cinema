@@ -1,0 +1,51 @@
+Fix the failed First Cut submission path without making any live Google, Veo, Gemini, or Cloud Storage request.
+
+Confirmed facts:
+
+* The failed job reached `client.models.generate_videos(...)`.
+* No Veo operation was accepted.
+* The reservation was released.
+* Allowance remains 0 used / 1 remaining.
+* The production request unexpectedly used `image=None`, even though this is storyboard-to-video.
+* The underlying SDK exception was hidden by `ProviderError("Vertex video submission failed.")`.
+
+Implement these generic fixes:
+
+1. Preserve the uploaded storyboard securely from the successful Direct analysis through First Cut approval and job creation.
+2. At submission, construct the SDK-supported image input using the validated storyboard bytes and MIME type:
+   `types.Image(image_bytes=storyboard_bytes, mime_type=storyboard_mime_type)`
+   Confirm the precise constructor fields against the installed `google-genai` SDK.
+3. Never silently convert a missing storyboard into text-to-video. Reject locally before reservation/submission with a clear error such as `storyboard_image_missing`.
+4. Do not store image bytes, data URLs, credentials, or prompts in logs. Store only a secure server-side reference or existing session-bound asset reference.
+5. Validate locally before creating the reservation:
+
+   * image exists
+   * decoded bytes are non-empty
+   * MIME is `image/png`, `image/jpeg`, or another format explicitly supported by Veo
+   * output URI is a valid `gs://bucket/prefix/` URI
+6. Add safe structured logging around `generate_videos(...)` that records only:
+
+   * exception type
+   * HTTP status
+   * Google status
+   * sanitized bounded message
+   * model
+   * region
+   * whether an image was supplied
+   * MIME type
+   * duration, aspect ratio, output count and audio flag
+     Never log image bytes, prompt content, credentials, tokens, or service-account JSON.
+7. Preserve reservation rollback on every pre-operation failure.
+8. Do not change the model, region, limits, bucket, IAM, fallback behavior, or provider settings.
+9. Add offline mocked tests proving:
+
+   * First Cut receives the same uploaded storyboard selected for Direct analysis.
+   * `generate_videos` receives a non-null SDK `Image`.
+   * missing/empty/invalid image data fails before provider invocation and before allowance consumption.
+   * an SDK submission failure releases the reservation.
+   * accepted operations retain the reservation exactly once.
+   * double-clicks remain idempotent.
+   * no image data appears in logs.
+10. Run the complete mock-only test suite, restart the managed workflow once, and make no live generation request afterward.
+
+Report the exact changed files, sanitized request shape, test results, and final allowance state.

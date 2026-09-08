@@ -1,0 +1,29 @@
+The current First Cut motion plan is unusable. Do not generate anything and do not consume an approval or allowance.
+
+The uploaded storyboard is dark, so the local pixel-level analyser returned no semantic detections. However, the screenplay explicitly identifies the astronomer, lantern, portal, mist, ruins and floodwater. The real Veo image-to-video prompt must not discard these screenplay-grounded motions simply because the local 2.5D analyser cannot identify them.
+
+Fix only the motion-plan grounding logic:
+
+1. Keep a clear distinction between:
+   - visually confirmed elements;
+   - screenplay-grounded elements;
+   - unsupported/invented elements.
+2. Allow bounded motion for screenplay-grounded elements when they are explicitly named in the screenplay and creative intent.
+3. Do not label screenplay-grounded actions as visually confirmed.
+4. For this scene, the approved plan should contain:
+   - Character: astronomer slowly raises the lantern from waist to shoulder height; feet remain planted.
+   - Character detail: cloak hem moves gently in the breeze.
+   - Object: portal rings rotate slowly.
+   - Object timing: one controlled portal pulse only in the final third.
+   - Environment: mist drifts through the ruins.
+   - Environment: subtle ripples move across the floodwater and portal reflection.
+   - Camera: slow slide right with a restrained push-in.
+   - Continuity: preserve astronomer identity and silhouette, lantern, architecture, portal structure, composition and blue-hour lighting.
+   - Prohibited: no walking, new subjects, cuts, abrupt motion, object replacement or major deformation.
+5. `confirmation_required` may remain true because local visual confidence is low, but its question must accurately ask whether to approve screenplay-grounded motion—not suggest replacing it with camera-only motion.
+6. Ensure these structured actions are actually included in the final Veo prompt sent after approval.
+7. Do not weaken continuity safeguards globally or invent actions absent from the screenplay.
+8. Add mocked tests for dark images with explicit screenplay-grounded subjects and verify all listed actions reach the provider prompt.
+9. Run all tests using mocks only. Do not call Gemini, Vertex, Veo or Cloud Storage. Do not create a job, approval or allowance reservation.
+
+Report the corrected structured plan and test results.

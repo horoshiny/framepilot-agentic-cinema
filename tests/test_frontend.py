@@ -4,7 +4,7 @@ from pathlib import Path
 STATIC = Path("static")
 
 
-def test_workspace_has_semantic_brief_stage_inspector_and_progress_surfaces():
+def test_workspace_has_semantic_brief_stage_and_scene_plan_surfaces():
     html = (STATIC / "index.html").read_text()
 
     assert '<main id="appShell" class="app-shell">' in html
@@ -14,20 +14,22 @@ def test_workspace_has_semantic_brief_stage_inspector_and_progress_surfaces():
     assert 'id="stage"' in html
     assert 'id="firstPass"' in html
     assert 'id="version"' in html
-    assert 'data-step="ANALYSE"' in html
-    assert 'data-step="ROUTE"' in html
-    assert 'data-step="DIRECT"' in html
-    assert 'data-step="ANIMATE"' in html
-    assert 'data-step="CRITIQUE"' in html
-    assert 'data-step="REVISE"' in html
-    assert 'data-tab="direction"' in html
-    assert 'data-tab="depth"' in html
-    assert 'data-tab="critique"' in html
+    assert 'class="agent-progress"' not in html
+    assert 'data-tab="direction"' not in html
+    assert 'data-tab="depth"' not in html
+    assert 'data-tab="critique"' not in html
     assert 'id="fineTune"' in html
-    assert 'Built with Replit Agent · Gemini on Vertex AI · Cost-safe local fallback.' in html
-    assert 'Scene brief</span><span>Agent direction' in html
-    assert 'id="howWorks"' in html
-    assert 'id="howWorksDialog"' in html
+    assert 'Direct Scene' in html
+    assert 'Motion Preview' in html
+    assert 'First Cut' in html
+    assert 'Generated Video' in html
+    assert 'Generation Details' in html
+    assert 'id="outputHeading"' not in html
+    assert 'LOCAL PROJECT' not in html
+    assert 'Fresh pass' not in html
+    assert 'RATE-LIMITED' not in html
+    assert 'How FramePilot works' not in html
+    assert 'about-line' not in html
     assert 'Why this is agentic' not in html
     assert '<span class="stage-state-mark" aria-hidden="true">FP</span>' not in html
 
@@ -46,7 +48,8 @@ def test_frontend_contains_accessible_state_and_progress_contracts():
     assert "renderProgress(data.activity)" in app_js
     assert "Analysing composition" in app_js
     assert "Director’s Cut ready" in app_js
-    assert "setStatusLabel('#cacheStatus'" in app_js
+    assert "Vertex AI connected" in app_js
+    assert "Local fallback" in app_js
     assert '.app-shell.brief-collapsed' in css
     assert '.stage[data-state="loading"]' in css
     assert '.stage[data-state="error"]' in css
@@ -90,7 +93,9 @@ def test_frontend_exposes_grounded_motion_plan_and_confirmation_surface():
     css = (STATIC / "style.css").read_text()
 
     assert 'id="motionPlan"' in html
-    assert 'id="motionCandidates"' in html
+    assert 'id="charactersPlan"' in html
+    assert 'id="objectsPlan"' in html
+    assert 'id="environmentPlan"' in html
     assert 'id="motionConfirmation"' in html
     assert "currentMotionPlan()" in app_js
     assert "renderMotionPlan()" in app_js
@@ -102,12 +107,14 @@ def test_frontend_exposes_isolated_video_states_and_approval_flow():
     html = (STATIC / "index.html").read_text()
     app_js = (STATIC / "app.js").read_text()
 
-    assert 'id="videoWorkspace"' in html
+    assert 'id="firstCutOutputPane"' in html
     assert 'data-video-kind="first_cut"' in html
     assert 'data-video-kind="director_cut"' in html
     assert 'id="videoApprovalDialog"' in html
     assert 'id="firstCutVideo"' in html
-    assert 'id="directorCutVideo"' in html
+    assert 'id="directorCutCard"' in html
+    assert 'id="directorCutVideo"' not in html
+    assert 'id="generateDirectorCut"' not in html
     assert "approval_required" in app_js
     assert "Approve and queue" in html
     assert "revisionApproved" in app_js

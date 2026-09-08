@@ -1,0 +1,45 @@
+Fix replacement authorization matching after a fresh Direct scene.
+
+Confirmed issue:
+
+* Normal First Cut allowance is exhausted.
+* One authorized replacement attempt exists for the previously failed accepted job.
+* The fresh Direct result reset the First Cut UI state to `not_generated`.
+* That removed the historical failed job ID from the current First Cut card.
+* `hasAvailableReplacementAuthorization()` now incorrectly requires the authorization’s original failed job ID to equal the current card’s job ID.
+* The UI therefore says: “Normal First Cut allowance is exhausted and no matching replacement is available.”
+
+Implement the replacement flow correctly:
+
+1. Keep the replacement authorization independently in allowance/session state, including its original authorized failed job ID.
+2. Do not require the current `not_generated` First Cut card to contain that historical job ID.
+3. Consider the replacement available when:
+
+   * authorization state is `available`,
+   * replacement remaining is greater than zero,
+   * it belongs to the current session/client,
+   * it is for `first_cut`,
+   * it has not been reserved or consumed,
+   * no active First Cut job exists.
+4. Carry the original authorized failed job ID explicitly in the approval and replacement job request.
+5. Let the backend validate that ID against the durable authorization before creating any job.
+6. Do not broaden the credit to unrelated clients or allow more than one replacement.
+7. After a new Direct result, preserve/refetch the replacement authorization instead of deriving it from `videoStates.first_cut.job_id`.
+8. Rerender the First Cut controls after allowance data loads.
+9. With the current state, the UI must show:
+
+   * `Authorized replacement attempt available`
+   * `Generate First Cut` enabled
+10. Add a regression test covering:
+
+* original accepted job failed,
+* one replacement authorized,
+* fresh Direct resets card to `not_generated`,
+* normal allowance is zero,
+* replacement remains available,
+* Generate First Cut becomes enabled,
+* approval includes the original failed job ID.
+
+11. Run the complete mock-only suite and restart the workflow once.
+
+Do not call Gemini, Vertex, Veo, or Cloud Storage. Do not create an approval/job, consume the replacement, change normal limits, or rerun Direct.

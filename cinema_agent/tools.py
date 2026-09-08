@@ -20,5 +20,6 @@ def critique_shot(plan_json: str) -> dict:
 def runtime_mode() -> str:
     configured = bool(os.getenv("GOOGLE_CLOUD_PROJECT"))
     demo_forced = os.getenv("DEMO_MODE", "true").lower() == "true"
-    return "demo" if demo_forced or not configured else "vertex"
+    vertex_enabled = os.getenv("ALLOW_VERTEX_INFERENCE", "false").lower() == "true"
+    return "vertex" if configured and not demo_forced and vertex_enabled else "demo"
 

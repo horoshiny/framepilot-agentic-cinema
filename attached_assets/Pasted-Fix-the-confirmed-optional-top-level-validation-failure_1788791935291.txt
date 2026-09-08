@@ -1,0 +1,53 @@
+Fix the confirmed optional top-level validation failure generically.
+
+Confirmed failure:
+
+* Gemini returned complete valid JSON with `FinishReason.STOP`.
+* Field-level entity recovery ran.
+* Final validation discarded everything because `preserve` exceeded its list limit.
+* Replacement authorization remains available and unused.
+
+Implement a reusable bounded-list sanitizer for every non-essential descriptive list in `SceneAnalysis`, including:
+
+* `preserve`
+* `prohibited_changes`
+* `grounding_conflicts`
+* warnings or similar descriptive lists
+
+For each list:
+
+1. Require a JSON array.
+2. Keep only valid non-empty strings.
+3. Normalize whitespace.
+4. Shorten overlong entries at a sentence or word boundary.
+5. Deduplicate while preserving order.
+6. Keep the most important entries up to the schema limit.
+7. Record only sanitized path/error metadata for removed entries.
+8. Never discard valid characters, objects, environment or camera analysis because an optional descriptive list is oversized or malformed.
+
+Also:
+
+* Add independent field-level recovery for the camera candidate.
+* Validate entities, relationships, camera and descriptive lists independently.
+* Run final `SceneAnalysis` validation only after every recoverable field has been bounded.
+* Use deterministic fallback only when no safe, usable semantic analysis remains.
+* Instruct Gemini about the exact maximum item counts so it normally stays within limits.
+* Do not add scene-specific words, labels or rules.
+* Do not inspect or log raw model output.
+* Keep JSON MIME mode, 8192 tokens, strict core validation and no automatic retry.
+* Preserve the available replacement authorization.
+
+Add generic offline tests covering:
+
+* oversized preserve list
+* oversized prohibition/conflict lists
+* invalid and duplicate list entries
+* overlong entries
+* malformed optional camera with valid entities
+* valid camera with malformed optional lists
+* valid entities surviving every optional-field failure
+* completely unusable core analysis still falling back
+
+Run the complete mock-only suite and restart the workflow. Do not call Gemini, Vertex AI, Veo or Cloud Storage.
+
+Report changed files, bounded-list limits, camera recovery behaviour, test results and replacement-authorization state.

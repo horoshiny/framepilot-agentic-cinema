@@ -1,0 +1,44 @@
+Fix the confirmed `SceneAnalysis` → `ShotPlan` label-conversion failure generically.
+
+Do not call Gemini, Vertex, Veo or `/api/direct`. Do not modify provider configuration, schemas, limits, credentials, IAM or approval behavior. Do not add scene-specific labels.
+
+First inspect the exact `MotionCandidate.label` validation rules and identify which generic label shapes can fail.
+
+Add one deterministic label-normalization function used before constructing every `MotionCandidate`:
+
+* Unicode-normalize text.
+* Remove control characters, markup and line breaks.
+* Trim and collapse whitespace.
+* Remove sentence-ending punctuation.
+* Convert action-like sentences into a short entity label only when this can be done without inventing meaning.
+* Respect the model’s minimum and maximum length.
+* Preserve ordinary human-readable labels and Unicode names.
+* Do not silently change one entity into another.
+
+Make conversion fault-isolated:
+
+* One invalid candidate must not discard the complete successful Vertex analysis.
+* If a label can be safely normalized, use the normalized label.
+* If it remains invalid or empty, exclude only that candidate and add a generic sanitized conflict/warning indicating that one malformed candidate was omitted.
+* Preserve all other characters, objects, environmental elements and camera analysis.
+* The final `ShotPlan` must still pass strict validation.
+* Do not retry Gemini.
+
+Also update the compact Gemini instruction to request short noun-phrase labels, but do not rely on prompting alone.
+
+Add generic tests for:
+
+* Leading/trailing whitespace
+* Newlines and control characters
+* Sentence-ending punctuation
+* Overlong labels
+* Unicode labels
+* Empty or punctuation-only labels
+* Action-sentence labels
+* One malformed candidate alongside several valid candidates
+* Successful complete `ShotPlan` construction without whole-result fallback
+* No scene-specific production labels
+
+Improve the UI fallback detail only if necessary so future local conversion errors distinguish provider failure from local validation failure. Do not expose model output or rejected values.
+
+Run focused tests and the full mock-only suite, restart the workflow, and do not submit a live `/api/direct` request afterward. Report the exact validator mismatch, implementation and tests.

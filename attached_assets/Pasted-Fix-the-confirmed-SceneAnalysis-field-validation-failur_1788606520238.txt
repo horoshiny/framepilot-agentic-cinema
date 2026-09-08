@@ -1,0 +1,65 @@
+Fix the confirmed `SceneAnalysis` field-validation failure generically.
+
+Confirmed evidence:
+
+* Gemini returned complete valid JSON.
+* Finish reason was `STOP`.
+* JSON started with `{` and ended with `}`.
+* `scene_summary` exceeded its local length limit.
+* Multiple `relationships[*].action` values were not strings.
+* Valid entities were discarded because the complete `SceneAnalysis` validation failed.
+* SceneAnalysis-to-ShotPlan conversion was never reached.
+
+Implement resilient field-level validation without weakening core safety:
+
+1. Parse the complete response with `json.loads()` first.
+2. Confirm the top-level value is an object.
+3. Validate essential scene/entity fields strictly.
+4. Do not discard the entire analysis because one optional relationship or descriptive field is invalid.
+
+For `scene_summary`:
+
+* Instruct Gemini to return a concise summary within the declared limit.
+* If it is a string but exceeds the limit, deterministically shorten it at a word or sentence boundary.
+* Do not fail the complete analysis for summary length alone.
+* Do not generate or invent replacement content.
+
+For relationships:
+
+* Clarify in the Gemini contract that `action` must be a concise JSON string or `null`; never an object, array or nested record.
+* Make `action` optional/nullable where the relationship does not require an action.
+* Validate each relationship independently.
+* Keep valid relationships.
+* Exclude an invalid relationship and add a sanitized validation conflict containing only its index/path and error type.
+* Never discard valid entities because an optional relationship is malformed.
+* Do not coerce dictionaries or arrays into invented prose.
+* Verify that retained relationship entity IDs reference valid retained entities.
+
+For entities:
+
+* Continue validating each entity strictly and independently.
+* Preserve all valid arbitrary characters, objects and environmental entities.
+* Invalid optional candidates should be excluded individually with a conflict record.
+* Do not add hardcoded names, garment rules, astronomer rules or scene-specific corrections.
+
+Maintain:
+
+* `max_output_tokens=8192`
+* `response_mime_type="application/json"`
+* no `response_schema`
+* no `response_json_schema`
+* no automatic retry
+* deterministic fallback only when no safe usable analysis remains
+
+Add generic offline tests proving:
+
+* overlong summary is safely shortened
+* nullable relationship action is accepted
+* dictionary/list relationship actions are excluded individually
+* valid entities survive malformed relationships
+* invalid entity references are excluded
+* multiple valid arbitrary object types remain recognized
+* no raw response content appears in logs
+* complete unusable JSON still triggers deterministic fallback
+
+Run the full mock-only suite and restart the workflow. Do not call Gemini, Vertex AI, Veo or Cloud Storage afterward. Report the changed validation boundary, tests and allowance state.

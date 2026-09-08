@@ -1,0 +1,65 @@
+Fix the confirmed Gemini `MAX_TOKENS` truncation generically.
+
+Confirmed evidence:
+
+* Gemini returned one candidate.
+* Finish reason: `MAX_TOKENS`
+* Output limit: `4096`
+* Response began with `{` but did not end with `}`.
+* JSON MIME mode was correctly active.
+* Provider schema fields were correctly absent.
+* Veo allowance remains 0 used / 1 remaining.
+
+Implement both parts below:
+
+1. Increase the Direct `SceneAnalysis` output budget from 4096 to 8192 tokens.
+2. Make the compact semantic response genuinely compact so ordinary scenes should normally remain well below that limit.
+
+Compact the model output as follows:
+
+* Do not repeat the entire creative intent inside every entity.
+* Do not repeat long preservation instructions inside every candidate.
+* Evidence fields should contain short source-local excerpts or concise observations only.
+* Store shared preservation and prohibition rules once at the plan level.
+* Relationships should contain only:
+
+  * source entity ID
+  * relation type
+  * target entity ID
+  * concise action
+* Keep entity records limited to:
+
+  * entity ID
+  * label
+  * semantic category
+  * concise action
+  * concise visual evidence
+  * concise screenplay evidence
+  * grounding source
+  * confidence
+  * visual confidence
+  * support state
+* Set sensible maximum character lengths and maximum item counts in local validation.
+* Instruct Gemini to prioritise the most narratively and visually important entities when limits are reached.
+* Do not hardcode production-scene labels or entity types.
+* Do not remove arbitrary-object recognition or the generic main-character logic.
+* Do not repair truncated JSON heuristically.
+* Do not retry automatically.
+* Keep strict local Pydantic validation.
+* Keep `response_mime_type="application/json"`.
+* Keep both provider schema fields absent.
+
+Add offline mocked tests for:
+
+* output budget equals 8192
+* compact entity and relationship records
+* no repeated full creative-intent text
+* bounded field lengths and item counts
+* normal valid response succeeds
+* truncated response remains rejected
+* `MAX_TOKENS` diagnostics remain payload-free
+* arbitrary scene/entity types remain supported
+
+Run the complete mock-only suite and restart the workflow. Do not make a live Gemini, Vertex AI, Veo or Cloud Storage request afterward.
+
+Report the new token budget, compact response limits, tests and allowance state.

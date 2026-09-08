@@ -1,0 +1,118 @@
+Final submission UI stabilization. Work carefully and complete the full task.
+
+Do not call Gemini, Vertex AI, Veo, or Cloud Storage. Do not run Direct, create an approval, submit a video job, poll Google, consume allowance, or alter ledger accounting.
+
+The successful existing First Cut is:
+
+* Job ID: `video-2eed1d13ff0842f8aafa095ee12536fc`
+* Status: `completed`
+* Model: `veo-3.1-generate-001`
+* Provider: `vertex`
+* Video URL: `/api/video-jobs/video-2eed1d13ff0842f8aafa095ee12536fc/video`
+
+The endpoint already serves the real generated Veo video successfully.
+
+Implement the following:
+
+1. Restore the completed First Cut automatically
+
+On page load and after application restart:
+
+* Load the latest durable `completed` First Cut belonging to the current client/session.
+* Never expose another client’s job.
+* Restore this job into the First Cut card even if the current Direct analysis is absent, reset, stale, or shows deterministic fallback.
+* Do not require the user to upload the storyboard or run Direct again.
+* Do not replace the completed job with `NOT GENERATED`.
+
+2. Display the real video inside the UI
+
+In the First Cut card:
+
+* Show status: `COMPLETED`
+* Render a native HTML5 video player using the job’s existing output URL.
+* Use `controls`, `playsinline`, and `preload="metadata"`.
+* Preserve the video’s 16:9 aspect ratio.
+* Do not autoplay with sound.
+* Show:
+
+  * `Vertex AI Veo`
+  * `veo-3.1-generate-001`
+  * `8-second First Cut`
+* Remove or hide the disabled `Generate First Cut` button once the completed video is restored.
+* Enable `Analyse First Cut` only if its existing analysis path is safe and does not create another video generation request.
+
+3. Simplify Director’s Cut
+
+Director’s Cut generation is unavailable because its configured allowance is zero.
+
+Replace the large empty Director’s Cut video panel with a compact optional-stage card:
+
+* Heading: `Director’s Cut`
+* Status: `Optional — not generated`
+* Copy: `A revised cut can be generated after First Cut critique when additional Veo allowance is available.`
+* Keep its generation button disabled.
+* Clearly show: `No Director’s Cut allowance available`
+* Do not imply that the completed First Cut is incomplete.
+* Do not reserve or consume any allowance.
+
+If the existing Director’s Cut workflow is required for judging, keep the underlying code intact but hide the large empty player and inactive controls until allowance becomes available.
+
+4. Simplify the page
+
+Remove or hide UI elements that distract from the successful demo:
+
+* Empty black video placeholders
+* Duplicate `NOT GENERATED` labels
+* Obsolete replacement-authorization messages
+* Exhausted-allowance banners once the completed First Cut is visible
+* Disabled buttons that cannot be used
+* Raw JSON or internal diagnostic content
+* Repeated provider/model labels
+
+Keep the useful workflow visible:
+
+* Storyboard and scene brief
+* Vertex multimodal direction
+* Motion Preview
+* Completed First Cut video
+* First Cut critique, if available
+* Compact optional Director’s Cut state
+
+Do not remove working backend routes or durable records.
+
+5. State priority
+
+A durable completed First Cut must take precedence over:
+
+* A later deterministic Direct fallback
+* Missing browser recovery state
+* A historical failed card
+* Exhausted normal allowance
+* Consumed replacement authorization
+
+Those states must never hide an already completed video.
+
+6. Offline regression tests
+
+Add mocked browser tests proving:
+
+* A completed durable First Cut is restored after refresh.
+* The real video URL is assigned to the video element.
+* The First Cut card shows `COMPLETED`.
+* The completed video remains visible even when Direct state says deterministic fallback.
+* Exhausted allowance does not hide a completed output.
+* No generation, approval, Direct, Gemini, Veo, or Cloud Storage request occurs during restoration.
+* Director’s Cut appears as a compact unavailable optional stage.
+* Jobs from another client/session are never restored.
+
+Run the complete mock-only test suite.
+
+After tests pass:
+
+* Restart the workflow once.
+* Verify the completed First Cut appears and plays in the UI.
+* Verify the browser console is clean.
+* Confirm no provider call occurred.
+* Commit all current changes to the existing Git repository.
+* Push to the already configured GitHub repository.
+* Report the test totals, commit hash, push result, and the exact final UI state.
