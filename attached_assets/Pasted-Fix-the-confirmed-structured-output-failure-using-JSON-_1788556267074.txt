@@ -1,0 +1,37 @@
+Fix the confirmed structured-output failure using JSON mode with local validation.
+
+First, run exactly one bounded Gemini diagnostic call:
+
+* Use the already successful minimal multimodal request.
+* Set only `response_mime_type="application/json"`.
+* Do not set `response_schema` or `response_json_schema`.
+* Ask for a tiny JSON object.
+* No retry.
+
+If this call fails, stop and report the sanitized error without modifying production code.
+
+If it succeeds, implement the following production fix:
+
+1. Remove `response_schema` and `response_json_schema` from the Direct planner’s Vertex request.
+2. Keep `response_mime_type="application/json"`.
+3. Keep the explicit single user `Content`, image `Part.from_bytes`, and production system instruction.
+4. Add a concise JSON contract to the production instruction describing the required `ShotPlan` keys and allowed values, generated generically from the application model where practical. Do not include unsupported Vertex response-schema configuration.
+5. Continue validating the returned text strictly with:
+   `ShotPlan.model_validate_json(response.text)`
+6. If parsing or validation fails, use the existing deterministic fallback. Do not retry automatically.
+7. Do not accept markdown fences, prose surrounding JSON, missing required fields or invented schema fields.
+8. Do not add scene-specific astronomer, lantern, portal or observatory rules.
+
+Add mocked tests proving:
+
+* Production config has `response_mime_type="application/json"`.
+* Both schema fields are absent.
+* A valid generic `ShotPlan` JSON response passes validation.
+* Markdown-wrapped, malformed and schema-invalid responses fail safely.
+* No automatic retry occurs.
+* Image and system instruction remain present.
+* Arbitrary scene inputs remain supported.
+
+Run focused tests and the full mock-only suite, restart the workflow, and do not run a live `/api/direct` afterward.
+
+Report the one diagnostic-call result, exact implementation, and test results. Confirm no Veo allowance or video operation was used.

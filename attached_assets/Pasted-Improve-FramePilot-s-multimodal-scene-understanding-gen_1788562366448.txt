@@ -1,0 +1,82 @@
+Improve FramePilot’s multimodal scene understanding generically for arbitrary storyboard images and screenplays.
+
+Do not implement scene-specific keywords, fixed entity names, garment lists, astronomer rules, or corrections tied to the current image.
+
+Architecture requirement:
+
+* Gemini multimodal performs semantic recognition and relationship extraction from each uploaded storyboard, screenplay and creative intent.
+* Deterministic Python validates, normalizes and safely converts Gemini’s output.
+* Python must not reclassify entities using a hardcoded vocabulary.
+
+Update the compact `SceneAnalysis` contract so Gemini independently returns:
+
+1. `characters`
+
+   * living or intentional actors
+   * their bodily actions, pose changes and spatial constraints
+
+2. `objects`
+
+   * visible non-character entities capable of independent motion, transformation or interaction
+   * including objects attached to, held by or worn by a character when their motion is distinct from the character’s body
+
+3. `environment`
+
+   * atmospheric, fluid, lighting, weather, particle and ambient effects
+   * environmental forces should be separate from the entities they affect
+
+4. `camera`
+
+   * requested or visually appropriate camera motion
+   * with evidence source and motion bounds
+
+5. `relationships`
+
+   * actor → action → affected entity
+   * cause → affected entity → resulting motion
+   * character → held/worn/attached object
+   * object → component
+   * environment → visual effect
+
+For every candidate require:
+
+* stable noun-phrase label
+* semantic category
+* action
+* visual evidence
+* screenplay evidence
+* intent evidence
+* confidence
+* visual confidence
+* grounding source
+* support state
+* relationship references where applicable
+
+Conversion rules:
+
+* Preserve Gemini’s semantic categories unless schema validation fails.
+* Do not merge two independently controllable entities into one motion candidate.
+* Do not duplicate one action across categories.
+* Separate an initiating force from the entity affected by that force.
+* Separate a character’s bodily motion from the motion of an associated object.
+* Components may remain part of a parent object unless they require independently controlled motion.
+* Invalid individual candidates should be excluded with a recorded conflict; they must not discard the entire valid multimodal analysis.
+* No scene-specific post-processing or keyword matching.
+
+Update the Veo prompt builder to reconstruct validated causal relationships naturally while preserving identity, composition and motion bounds.
+
+Add generic mocked tests covering unrelated scenes, such as:
+
+* wind moving an attached fabric while a person remains still
+* a vehicle moving while its driver changes pose
+* water moving a floating object
+* a machine rotating one component while its body remains fixed
+* light affecting a surface
+* an animal carrying an object
+* a character interacting with a door or tool
+
+Tests must prove the logic generalizes without checking for specific production-scene labels.
+
+Run the complete mock-only suite and restart the workflow. Do not call Gemini, Vertex AI, Veo or Cloud Storage, and do not consume an allowance.
+
+Report the revised semantic contract, conversion rules, changed files, test results and allowance state.

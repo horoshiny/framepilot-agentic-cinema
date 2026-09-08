@@ -1,0 +1,48 @@
+Fix the visible difference between First Pass and Director’s Cut without changing backend prompts, Vertex authentication, schemas, routing, caching, rate limits, cost controls, or the redesigned UI.
+
+Current problem:
+Both pass selectors exist, but recorded playback shows almost identical framing and layer motion. The revised plan appears not to produce distinct rendered transforms.
+
+Requirements:
+
+1. Trace the complete frontend path from:
+   First Pass / Director’s Cut selector
+   → selected plan data
+   → animation parameters
+   → layer transforms and playback.
+
+2. Store and render First Pass and Director’s Cut as separate immutable plan objects. Switching cuts must select the correct plan and restart playback from time zero.
+
+3. Ensure each cut independently applies its own:
+   - duration
+   - zoom
+   - horizontal/vertical camera movement
+   - foreground displacement
+   - subject/midground displacement
+   - background displacement
+   - easing
+
+4. Apply movement to the actual masked depth layers, not only to a shared preview wrapper.
+
+5. Make strong parallax visibly readable but still cinematic. At desktop stage width, strong parallax may use approximately:
+   - foreground: 40–80 px
+   - subject/midground: 15–35 px
+   - background: 4–12 px
+   Maintain overscan so no image edges appear.
+
+6. When critique revises the shot, Director’s Cut must differ observably from First Pass in at least two motion parameters. If the generated revision is effectively identical, use a deterministic local differentiation rule.
+
+7. Add a compact “Changes in Director’s Cut” summary in the Critique tab, such as:
+   Duration 12s → 8s
+   Zoom 1.12× → 1.06×
+   Pan +8 → -4
+   Parallax 70% → 45%
+   Only display values that actually changed.
+
+8. Add frontend regression tests proving:
+   - selecting each cut resolves to a different plan when revision changes exist;
+   - generated transform/keyframe parameters differ;
+   - switching cuts resets playback;
+   - no difference is falsely claimed when plans are identical.
+
+Use cached responses or fixtures only. Do not make a real Vertex or Veo request. Do not add services or dependencies. Preserve image-aware depth, artifact fixes, shot diversity, accessibility, and all credit limits. Run the complete test suite and report changed files and results. Do not publish.

@@ -1,0 +1,72 @@
+Replace the brittle Gemini-to-`ShotPlan` boundary with a compact multimodal analysis model and deterministic Python conversion.
+
+Do not hardcode this storyboard, astronomer, lantern, portal, mist or any scene-specific entities.
+
+Create a strict but simple `SceneAnalysis` Pydantic model:
+
+* `scene_summary`: string
+* `characters`: array of `SceneEntity`
+* `objects`: array of `SceneEntity`
+* `environment`: array of `SceneEntity`
+* `camera`: `CameraAnalysis`
+* `preserve`: array of strings
+* `prohibit`: array of strings
+* `conflicts`: array of strings
+
+`SceneEntity`:
+
+* `label`: string
+* `visible`: boolean
+* `visual_evidence`: string or null
+* `screenplay_evidence`: string or null
+* `suggested_motion`: string or null
+* `confidence`: float from 0 to 1
+
+`CameraAnalysis`:
+
+* `movement`: string
+* `visual_evidence`: string or null
+* `screenplay_evidence`: string or null
+* `confidence`: float from 0 to 1
+
+Use the existing successful Vertex multimodal request:
+
+* One user `Content`
+* Text part plus storyboard image part
+* Existing production system instruction
+* `response_mime_type="application/json"`
+* No `response_schema`
+* No `response_json_schema`
+* Exactly one provider attempt with no retry
+
+Tell Gemini to return only the compact `SceneAnalysis` JSON. Validate it with `SceneAnalysis.model_validate_json()`.
+
+Then use deterministic Python code to convert the validated `SceneAnalysis` into the existing complete `ShotPlan`:
+
+* Python supplies internal fields such as `depth_notes`, `shot.motion_intensity`, bounds, defaults and required metadata.
+* Preserve visual evidence separately from screenplay evidence.
+* Screenplay-only entities must not be presented as visually confirmed.
+* Unsupported motion must require confirmation.
+* Do not invent subjects absent from both the image analysis and screenplay.
+* Preserve existing safety, approval and grounding requirements.
+* Validate the completed result with the existing `ShotPlan` model.
+
+If the compact analysis itself is malformed, use the existing deterministic fallback. Do not retry.
+
+Add generic mocked tests covering:
+
+* Arbitrary characters and objects
+* Multiple objects
+* No-character scenes
+* Environmental motion
+* Camera-only scenes
+* Visual versus screenplay-only evidence
+* Image/screenplay conflicts
+* Confidence conversion
+* Complete valid `ShotPlan` construction
+* Malformed analysis fallback with no retry
+* No scene-specific production rules
+
+Keep Veo, storage, credentials, limits, approvals and UI behavior unchanged.
+
+Run focused tests and the full mock-only suite, restart the workflow, and do not make a live `/api/direct` request afterward. Report the changes and test results.

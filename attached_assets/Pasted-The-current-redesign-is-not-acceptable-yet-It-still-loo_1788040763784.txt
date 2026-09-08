@@ -1,0 +1,58 @@
+The current redesign is not acceptable yet. It still looks like a generic dark AI dashboard because of the black background, gold accents, tiny uppercase labels, bordered boxes, verbose explanation panel and developer-tool density.
+
+Perform a decisive visual redesign while preserving all functionality and backend behaviour.
+
+Visual direction:
+Create a contemporary editorial film-production workspace—warm, tactile, restrained and human-designed. It should resemble a professional screenplay and film-editing product, not an AI SaaS dashboard, crypto interface or luxury black-and-gold template.
+
+Colour system:
+- application shell: warm bone #F3EFE6;
+- left and right panels: paper ivory #FAF7F0;
+- panel variation: warm stone #E6DED1;
+- primary text: ink #242522;
+- secondary text: slate #686D6A;
+- central Stage only: cinema charcoal #171B1E;
+- primary action/active state: muted rust #B6533F;
+- success/cache/local status: sage #657B68;
+- metadata: cool grey-blue #687783;
+- borders: warm grey #C9C1B6.
+
+Remove gold entirely. No gradients, glow, neon, glassmorphism or large black page background.
+
+Layout and hierarchy:
+- Keep the Scene Brief / Stage / Inspector structure.
+- Make the central Stage occupy at least 55% of the usable width and remain the dominant visual element.
+- Use warm light panels around the dark Stage.
+- Reduce visible borders and cards; separate areas using spacing and subtle 1px rules.
+- Keep technical sliders collapsed by default.
+- Make First Pass / Director’s Cut a clear film-editing toggle beneath the Stage.
+- Render the six agent stages as a slim film-strip/timeline with small numbered markers and short state labels.
+- Remove the permanent “Why this is agentic” paragraph box. Replace it with a small “How FramePilot works” info icon or modal.
+- Move hackathon provenance to a quiet single-line footer:
+  “Built with Replit Agent · Gemini on Vertex AI · Cost-safe local fallback.”
+- Replace multiple outlined status badges with small coloured dots and compact text.
+- Remove decorative arrows, sparkle/AI icons and unnecessary technical copy.
+
+Typography:
+- Use a clean humanist system sans-serif for the interface.
+- Use an editorial serif only for the generated emotional-intent/result title.
+- Use monospace only inside screenplay text and timestamps.
+- Use sentence case everywhere except the screenplay.
+- Remove excessive letter-spacing and tiny all-caps labels.
+- Increase body text readability and shorten helper copy.
+
+Empty state:
+- Do not show a large empty black rectangle with an FP logo.
+- Show a refined neutral Stage containing a subtle storyboard-frame outline and the line:
+  “Upload a frame to begin.”
+- Keep it visually quiet.
+
+Interaction polish:
+- Use one clear rust-coloured “Direct scene” button.
+- Use compact physical editing-style controls with 6–8px corner radii, not generic large cards.
+- Provide clear hover, active, loading, cached, fallback and completed states.
+- Keep depth overlays off by default.
+- Ensure no horizontal page scrolling, clipping or overlapping at 1366×768 and 1920×1080.
+- Important information required for the three-minute hackathon demo must fit without excessive vertical scrolling.
+
+Do not modify API behaviour, prompts, schemas, Vertex integration, caching, semantic routing, rate limits, image-aware depth, compositor logic or cost controls. Do not call Vertex. Do not add frameworks or external services. Update frontend tests, run the full test suite and stop for review without publishing.

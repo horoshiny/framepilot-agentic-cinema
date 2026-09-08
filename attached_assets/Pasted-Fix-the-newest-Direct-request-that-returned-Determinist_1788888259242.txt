@@ -1,0 +1,39 @@
+Fix the newest Direct request that returned `Deterministic fallback`. We have one day left, so perform one evidence-led implementation pass—not another diagnosis-only loop.
+
+First inspect only the newest existing `/api/direct` diagnostic. Do not make a new provider request.
+
+Identify:
+
+* Exception class
+* Exact parsing/validation/conversion stage
+* Finish reason
+* Sanitized validation paths and error types
+* Whether Gemini returned complete JSON
+* Which valid character/object/environment entries were retained before the failure
+
+Then implement the smallest generic correction required by that exact diagnostic.
+
+Requirements:
+
+1. Preserve every independently valid entity even if another optional field is malformed.
+2. Validate characters, objects, environment, relationships, camera, preserve lists, and prohibited lists independently.
+3. A malformed optional item must become a sanitized grounding conflict—not invalidate the entire analysis.
+4. Tangible inanimate entities that are held, worn, attached, carried, opened, raised, rotated, or otherwise manipulated must remain Objects.
+5. Natural phenomena, atmosphere, weather, light effects, mist, smoke, water motion, and forces remain Environment.
+6. Do not hardcode astronomer, lantern, cloak, portal, or any scene-specific noun.
+7. Do not invent entities absent from the image or supplied text.
+8. Keep `analysis_source=vertex_multimodal` when Gemini returned usable visual analysis and only optional fields required local recovery.
+9. Use deterministic fallback only when no usable scene analysis can be retained.
+10. Add mocked regressions for:
+
+    * one malformed entity while valid objects survive,
+    * malformed optional lists,
+    * wearable/held tangible items classified as objects,
+    * arbitrary non-human main characters,
+    * no scene-specific vocabulary.
+11. Run the full mock-only suite.
+12. Restart the workflow once.
+13. Do not call Gemini, Vertex, Veo, or Cloud Storage.
+14. Do not modify or consume the final remediation authorization.
+
+Report the newest failure path, exact generic correction, test results, and confirm the remediation attempt remains available.

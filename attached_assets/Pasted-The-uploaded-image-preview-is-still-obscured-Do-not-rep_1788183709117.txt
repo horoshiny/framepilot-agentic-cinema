@@ -1,0 +1,43 @@
+The uploaded image preview is still obscured. Do not repeat the previous state-only fix—inspect the rendered DOM and computed CSS while reproducing the issue.
+
+Observed evidence:
+- The selected filename displays “ready”.
+- The uploaded image is visibly present behind the Stage.
+- A pale overlay containing “Upload a frame to begin” remains above it.
+Therefore upload and decoding work; the remaining bug is overlay visibility/render order.
+
+Diagnose and fix:
+
+1. Upload a local fixture image in the running preview and inspect the Stage DOM after image.onload completes.
+2. Identify the exact element producing:
+   “Upload a frame to begin”
+   “Or direct the bundled scene from the brief.”
+3. Inspect its:
+   - hidden attribute
+   - class list
+   - computed display, visibility and opacity
+   - z-index and positioning
+   - parent state classes
+4. Check whether CSS overrides the native `[hidden]` behavior, especially rules such as:
+   display: flex
+   display: grid
+   opacity
+   pseudo-elements
+   or selectors with greater specificity.
+5. Add a global safety rule:
+   [hidden] { display: none !important; }
+6. Do not merely fade the overlay. Remove it from layout/rendering whenever a valid uploaded image or bundled preview exists.
+7. Use one authoritative Stage state:
+   empty | image-ready | loading | completed | error
+   The empty overlay may render only when state === "empty".
+8. Ensure later health checks, tab changes, cut selection and render functions cannot reset image-ready back to empty.
+9. Ensure the uploaded image itself uses normal opacity with no pale wash, blend mode, loading filter or translucent pseudo-element above it.
+10. Add a browser-level regression test that checks after upload:
+    - the actual image is loaded;
+    - naturalWidth > 0;
+    - empty overlay has computed display: none or is absent;
+    - image computed opacity is 1;
+    - no covering Stage overlay remains visible.
+11. Run the app and verify the fix visually at 1366×768, not only with unit tests.
+
+Do not change backend logic, prompts, Vertex behavior, schemas, caching, routing, motion, rate limits or cost controls. Do not make a real Vertex or Veo request. Run the complete test suite and report the root cause, exact changed files and results.

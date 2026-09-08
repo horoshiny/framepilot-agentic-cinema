@@ -1,50 +1,39 @@
-from .schemas import Critique, ShotParameters, ShotPlan
+from .motion import demo_direction
+from .schemas import Critique, ShotPlan
+from .depth import heuristic_depth_layout
 
 
-def demo_plan(screenplay: str, mood: str) -> ShotPlan:
-    subject = "the figure at the illuminated doorway"
-    lower = screenplay.lower()
-    if "lantern" in lower:
-        subject = "the lantern and the character's face"
-    elif "door" in lower:
-        subject = "the hand approaching the door handle"
+def demo_plan(screenplay: str, mood: str, image_data_url: str | None = None) -> ShotPlan:
+    shot, motion_plan = demo_direction(screenplay, mood, image_data_url)
+    frame_label = "uploaded frame" if image_data_url else "bundled frame"
 
     return ShotPlan(
-        scene_summary="A solitary character approaches a threshold as the environment quietly signals danger.",
+        scene_summary=f"A conservative camera study of the {frame_label}, grounded in the supplied text and intent.",
         emotional_intent=mood or "rising dread",
-        focal_subject=subject,
+        focal_subject="the visual center of the supplied frame",
         depth_notes={
-            "foreground": "dark branches and drifting particles",
-            "subject": "character and practical light source",
-            "background": "distant architecture softened by haze",
+            "foreground": "Only image-space regions identified as nearest are given foreground travel.",
+            "subject": "No semantic subject is asserted without confident image evidence.",
+            "background": "The far image plane remains visually consistent while the camera moves.",
         },
-        shot=ShotParameters(
-            duration_seconds=8,
-            camera_motion="push_in",
-            zoom_start=1.0,
-            zoom_end=1.16,
-            pan_x=-4,
-            pan_y=1,
-            parallax_strength=0.46,
-            motion_intensity=0.38,
-            atmosphere=["fog", "dust", "light_flicker"],
-            transition="shadow_wipe",
-        ),
+        shot=shot,
+        motion_plan=motion_plan,
         directing_rationale=(
-            "A restrained push-in gradually removes visual escape routes while the practical light "
-            "keeps attention on the character's decision."
+            "Use the smallest supported camera move that serves the supplied intent while preserving "
+            "the frame's visible identity and geometry."
         ),
+        depth_layout=heuristic_depth_layout(),
     )
 
 
 def demo_critique(plan: ShotPlan) -> Critique:
     revised = plan.shot.model_copy(
         update={
-            "duration_seconds": 9.5,
-            "zoom_end": 1.12,
-            "parallax_strength": 0.34,
-            "motion_intensity": 0.27,
-            "atmosphere": ["fog", "light_flicker"],
+            "duration_seconds": min(20, plan.shot.duration_seconds + 1.5),
+            "zoom_end": max(1.0, plan.shot.zoom_end - 0.03),
+            "parallax_strength": max(0, plan.shot.parallax_strength - 0.08),
+            "motion_intensity": max(0, plan.shot.motion_intensity - 0.08),
+            "atmosphere": plan.shot.atmosphere[:1],
         }
     )
     return Critique(
@@ -53,13 +42,13 @@ def demo_critique(plan: ShotPlan) -> Critique:
         cinematic_motion_score=7,
         restraint_score=6,
         diagnosis=(
-            "The direction correctly isolates the subject, but the first pass moves too quickly and "
-            "layers too many effects for a suspense beat."
+            "The Motion Preview is grounded, but the motion budget can be softened to keep the visible "
+            "frame consistent and the requested beat legible."
         ),
         revision=revised,
         revision_rationale=(
-            "Lengthen the shot, soften the push-in and remove dust so the lantern flicker becomes the "
-            "single secondary motion cue."
+            "Lengthen the shot, reduce camera travel and retain at most one explicitly supported "
+            "environmental cue."
         ),
     )
 

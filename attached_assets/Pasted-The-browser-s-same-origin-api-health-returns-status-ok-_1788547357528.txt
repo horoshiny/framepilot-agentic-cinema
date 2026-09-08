@@ -1,0 +1,47 @@
+The browser’s same-origin `/api/health` returns:
+
+{"status":"ok","mode":"vertex","video_provider":"vertex"}
+
+But the current UI still shows “Demo mode” and “DEMO GENERATION ONLY,” displays no analysis-source badge, and the latest Direct result is clearly deterministic fallback output with semantic errors.
+
+Diagnose and fix this exact mismatch. Do not submit another Direct request during diagnosis, and do not call Google, Gemini, Vertex, Veo or Cloud Storage.
+
+Inspect:
+
+1. The latest existing `/api/direct` server log and response metadata.
+2. Whether that response contained `analysis_source`.
+3. Whether Vertex analysis was attempted, skipped, rate-limited, rejected, timed out or failed schema validation.
+4. The sanitized fallback reason—do not expose credentials, tokens, prompts containing secrets or raw provider responses.
+5. Whether the frontend reads `/api/health` asynchronously and rerenders provider copy after the response.
+6. Whether `renderVideoProviderCopy()` is called too early, uses stale/default mock state, or is not called again after health loads.
+7. Whether the HTML contains the new analysis-source badge element expected by `app.js`.
+8. Whether cached/restored direction data predating `analysis_source` is being displayed after refresh.
+9. Whether the frontend static files served by the current process match the latest source files.
+
+Apply only the smallest required fixes so that:
+
+* Vertex health always displays “Vertex mode,” never “Demo mode.”
+* Vertex mode displays “Vertex AI Veo,” not “DEMO GENERATION ONLY.”
+* Direction results display either “Vertex multimodal” or “Deterministic fallback.”
+* Restored legacy direction data without `analysis_source` is clearly labelled “Legacy/fallback result” and cannot be approved for Veo.
+* A new Direct request replaces old cached direction state.
+* The UI never labels fallback output as Vertex multimodal.
+* Failed Vertex analysis exposes a concise sanitized fallback reason in the UI/logs.
+* No scene-specific rules are added.
+
+Test using mocked health and direction responses only:
+
+* Vertex health + Vertex analysis.
+* Vertex health + deterministic fallback.
+* Vertex health + legacy restored result.
+* Mock health.
+* Delayed health response.
+* Stale browser storage replaced by a new direction response.
+
+Run the full mock-only suite, restart the managed workflow, and verify health and allowance remain:
+
+* provider `vertex`
+* 0 used
+* 1 remaining
+
+Do not create an approval, job or reservation. Do not clear the ledger or change Secrets, limits, IAM, storage, model, region, critique or Director’s Cut.

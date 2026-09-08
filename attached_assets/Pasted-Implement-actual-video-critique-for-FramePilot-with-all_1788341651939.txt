@@ -1,0 +1,46 @@
+Implement actual-video critique for FramePilot, with all development and testing offline/mocked.
+
+First inspect the existing video-job and critique implementation. Replace plan-only critique in the generated-video workflow with a pipeline capable of evaluating the completed First Cut.
+
+Requirements:
+
+1. Keep these distinct:
+   - Plan review: evaluates intended direction before generation.
+   - Video critique: evaluates the actual completed video.
+
+2. Prepare the completed video for Gemini video understanding using the existing Google SDK. Include the original storyboard, screenplay and approved motion plan as comparison context. Bound input size and output tokens.
+
+3. Return structured observations covering:
+   - requested actions achieved or missing;
+   - character/object consistency;
+   - camera movement and pacing;
+   - visible artifacts;
+   - emotional-intent alignment;
+   - specific revision recommendations.
+
+4. Require timestamped evidence where possible. Clearly state uncertainty. Never claim to observe footage that was not supplied.
+
+5. Build the Director’s Cut prompt from the original approved plan plus supported critique findings. Preserve successful elements and target identified problems. Do not force arbitrary changes or guarantee the revision will improve the result.
+
+6. If video analysis fails, show “Video critique unavailable.” A plan-only review may remain available but must never be labelled video critique.
+
+7. Cache critique by video content hash, source-plan hash, model and prompt version. Playback and tab switching must not trigger inference.
+
+8. Add a separate explicit “Analyse First Cut” action. Explain that live analysis uses a Gemini request. Enforce existing applicable Gemini limits and a configurable critique cap. No automatic calls or retries.
+
+9. Keep live video critique disabled by default. In mock mode, label all observations “Demo critique—not an analysis of your video.”
+
+10. Test with local fixtures and mocked Google responses:
+    - actual video included in the analysis request;
+    - missing or unreadable video;
+    - malformed model response;
+    - timestamp validation;
+    - cache hits;
+    - duplicate analysis requests;
+    - limits and disabled mode;
+    - revision grounded in critique;
+    - no automatic Director’s Cut generation.
+
+Preserve the current UI, authentication, Veo submission safeguards and Motion Preview fallback. Do not enable Veo or live critique, change secrets, publish, or make any real Google model request.
+
+Run the complete test suite and report implemented behavior, remaining limitations and results.

@@ -1,0 +1,51 @@
+Implement the confirmed generic JSON-contract fix for the Vertex Direct planner.
+
+Do not change the image path, model, region, credentials, JSON MIME mode, fallback behavior, Veo configuration, limits or IAM. Do not weaken the `ShotPlan` model or its strict validation. Do not add automatic retries or scene-specific rules.
+
+Replace the incomplete JSON contract with an exact, deterministic, model-derived contract generated from `ShotPlan.model_json_schema()`.
+
+The contract given to Gemini must explicitly describe every field recursively:
+
+* Exact JSON type
+* Required, optional and nullable status
+* Nested object properties
+* Dictionary key/value types
+* Array item types
+* Minimum/maximum item counts
+* Numeric minimum/maximum values
+* Enum values
+* Whether extra keys are prohibited
+
+Resolve local `$ref` entries so the instruction is understandable without requiring Gemini to interpret unresolved schema references.
+
+Explicitly ensure the model-derived contract states:
+
+* `depth_notes` is an object mapping strings to strings—not a scalar or array.
+* `shot.motion_intensity` is a JSON number within its declared bounds—not a descriptive string.
+
+Keep:
+
+* `response_mime_type="application/json"`
+* no `response_schema`
+* no `response_json_schema`
+* `ShotPlan.model_validate_json(response.text)` as final validation
+* the existing recursive extra-field check
+* exactly one provider attempt with no retry
+
+Improve validation logging so all error locations and error types can be recorded in a bounded sanitized list without logging rejected values, prompts, screenplay, image data or model output.
+
+Add scene-agnostic mocked tests proving:
+
+1. Every `ShotPlan` field and nested field appears with its correct type.
+2. `$ref` definitions are resolved correctly.
+3. Dictionary, numeric, enum, nullable and array constraints are represented.
+4. `depth_notes` is specified as `object<string,string>`.
+5. `shot.motion_intensity` is specified as a bounded number.
+6. A compliant generic Gemini response passes strict validation.
+7. Wrong field types fail without retry.
+8. No production provider schema is sent.
+9. No hardcoded observatory/astronomer/object rules exist.
+
+Run focused tests and the full mock-only suite, restart the workflow, and do not submit a live `/api/direct` request afterward.
+
+Report the exact change and test results.

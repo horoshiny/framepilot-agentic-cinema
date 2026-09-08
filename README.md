@@ -13,7 +13,7 @@ This repository contains a demonstrable local MVP with both Vertex AI Gemini cal
 3. Start the app with `uvicorn app:app --reload`.
 4. Open `http://127.0.0.1:8000`.
 
-For live Gemini direction, copy `.env.example` to `.env`, provide the Google Cloud project ID, set `DEMO_MODE=false`, and authenticate locally with Application Default Credentials.
+The app is locked to deterministic demo mode by default, even when a Google Cloud project is configured. For intentional local live Gemini direction, copy `.env.example` to `.env`, provide the Google Cloud project ID, set both `DEMO_MODE=false` and `ALLOW_VERTEX_INFERENCE=true`, and authenticate locally with Application Default Credentials. Keep `ALLOW_VERTEX_INFERENCE=false` when publishing the demo.
 
 ## Agent workflow
 

@@ -562,7 +562,7 @@ class MockVideoJobService:
                     "storyboard_bytes": row.get("storyboard_bytes"),
                     "storyboard_mime_type": row.get("storyboard_mime_type"),
                 }
-            return job
+            return job.model_copy(update={"scene_snapshot": self._scene_snapshot(row, job)})
 
     def video_bytes(self, job_id: str, client_id: str) -> tuple[bytes, str]:
         with self._lock:
@@ -707,6 +707,26 @@ class MockVideoJobService:
             ),
             revision_approved=bool(row["revision_approved"]),
         )
+
+    @staticmethod
+    def _scene_snapshot(row: dict, job: VideoJob) -> dict | None:
+        raw_context = row.get("critique_context_json")
+        if not raw_context:
+            return None
+        try:
+            context = json.loads(raw_context)
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(context, dict):
+            return None
+        return {
+            "scene_key": job.scene_key,
+            "source_signature": job.source_signature,
+            "screenplay": context.get("screenplay"),
+            "creative_intent": context.get("creative_intent"),
+            "direction_response": context.get("direction_response"),
+            "shot_plan": context.get("shot_plan"),
+        }
 
     def _remember_job(self, job: VideoJob, row: dict | None = None) -> None:
         row = row or {}

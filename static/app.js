@@ -34,12 +34,14 @@ let conservativePlanConfirmed = false;
 let videoCritique = null;
 let videoCritiqueBusy = false;
 let durableFirstCutRestored = false;
+let recoveredScenePlanAvailable = true;
+let outputMode = 'motion_preview';
 const VIDEO_RECOVERY_STORAGE_KEY = 'framepilot.video-recovery';
 const VIDEO_RECOVERY_VERSION = 1;
 const modeLabels = {
-  demo: 'Demo mode',
-  vertex: 'Vertex mode',
-  rate_limited_fallback: 'Rate-limited fallback',
+  demo: 'Local fallback',
+  vertex: 'Vertex AI connected',
+  rate_limited_fallback: 'Local fallback',
 };
 const DEFAULT_VEO_MODEL = 'veo-3.1-generate-001';
 
@@ -210,12 +212,16 @@ function renderVideoProviderCopy() {
   setTextIfPresent(
     '#firstCutProviderLabel',
     completedFirstCut && (videoStates.first_cut.provider === 'vertex' || vertex)
-      ? `Vertex AI Veo · ${videoStates.first_cut.model || videoModel || DEFAULT_VEO_MODEL} · 8-second First Cut`
-      : !providerKnown ? 'Checking provider' : vertex ? 'First Cut' : 'Demo generation',
+      ? `Vertex AI Veo · ${videoStates.first_cut.model || videoModel || DEFAULT_VEO_MODEL} · 8 seconds`
+      : !providerKnown ? 'Checking provider…' : vertex ? 'First Cut' : 'Demo generation',
+  );
+  setTextIfPresent(
+    '#firstCutRequestProviderLabel',
+    !providerKnown ? 'Checking provider…' : vertex ? 'Vertex AI Veo' : 'Demo generation',
   );
   setTextIfPresent(
     '#directorCutProviderLabel',
-    !providerKnown ? 'Checking provider' : vertex ? 'Director’s Cut' : 'Demo generation',
+    'Unavailable in this demo',
   );
   const allowanceMessage = !providerKnown
     ? 'Checking allowance…'
@@ -245,6 +251,7 @@ function renderGenerateVeoButton() {
 
 function setStatusLabel(selector, text, state) {
   const status = $(selector);
+  if (!status) return;
   const label = status.querySelector('.status-label');
   if (label) label.textContent = text;
   else status.textContent = text;
@@ -300,14 +307,117 @@ function setPassSelection(revised) {
   version.disabled = !cutPlans.revised;
 }
 
-function resetProgress() {
-  document.querySelectorAll('.progress-step').forEach(step => {
-    step.dataset.state = '';
-    step.removeAttribute('title');
+function renderOutputMode() {
+  const firstReady = videoStates.first_cut.status === 'completed';
+  const motionButton = $('#motionPreviewOutput');
+  const firstButton = $('#firstCutOutput');
+  const motionPane = $('#motionPreviewOutputPane');
+  const firstPane = $('#firstCutOutputPane');
+  if (!motionButton || !firstButton || !motionPane || !firstPane) return;
+  if (!firstReady && outputMode === 'first_cut') outputMode = 'motion_preview';
+  firstButton.hidden = !firstReady;
+  firstButton.disabled = !firstReady;
+  const firstSelected = firstReady && outputMode === 'first_cut';
+  motionButton.classList.toggle('active', !firstSelected);
+  firstButton.classList.toggle('active', firstSelected);
+  motionButton.setAttribute('aria-selected', String(!firstSelected));
+  firstButton.setAttribute('aria-selected', String(firstSelected));
+  motionPane.hidden = firstSelected;
+  firstPane.hidden = !firstSelected;
+  const generationDetails = $('#generationDetailsPanel');
+  if (generationDetails) {
+    generationDetails.hidden = !firstSelected;
+    if (firstSelected) renderGenerationDetails(videoStates.first_cut);
+  }
+  const scenePlanContent = $('#scenePlanContent');
+  if (scenePlanContent) {
+    scenePlanContent.hidden = firstSelected || !recoveredScenePlanAvailable;
+  }
+  renderWorkflowStages();
+}
+
+function selectOutput(mode) {
+  if (mode === 'first_cut' && videoStates.first_cut.status !== 'completed') return;
+  outputMode = mode;
+  renderOutputMode();
+}
+
+function renderWorkflowStages() {
+  const stages = [
+    $('#workflowDirect'),
+    $('#workflowMotion'),
+    $('#workflowFirstCut'),
+  ];
+  const activeIndex = videoStates.first_cut.status === 'completed' && outputMode === 'first_cut'
+    ? 2
+    : data
+      ? 1
+      : 0;
+  stages.forEach((stageNode, index) => {
+    if (!stageNode) return;
+    stageNode.dataset.state = index < activeIndex
+      ? 'complete'
+      : index === activeIndex
+        ? 'active'
+        : '';
+    stageNode.classList.toggle('active', index === activeIndex);
   });
-  $('#progressSummary').textContent = 'Waiting for a scene';
-  $('#progressDetail').hidden = true;
-  $('#progressDetail').textContent = '';
+}
+
+function renderGenerationDetails(state) {
+  setTextIfPresent(
+    '#generationDetailStatus',
+    state?.status === 'completed' ? 'Completed' : VIDEO_STATUS_LABELS[state?.status] || 'Unavailable',
+  );
+  setTextIfPresent(
+    '#generationDetailProvider',
+    state?.provider === 'vertex' || state?.output?.source === 'vertex_veo'
+      ? 'Vertex AI Veo'
+      : 'Demo generation',
+  );
+  setTextIfPresent('#generationDetailModel', state?.model || videoModel || DEFAULT_VEO_MODEL);
+  const video = $('#firstCutVideo');
+  const duration = video && Number.isFinite(video.duration) ? Math.round(video.duration) : 8;
+  setTextIfPresent('#generationDetailDuration', `${duration} seconds`);
+}
+
+function renderRecoveredSceneView(sceneSnapshot) {
+  const hasDirectionResponse = Boolean(
+    sceneSnapshot?.direction_response?.plan
+      && sceneSnapshot.direction_response.critique
+      && sceneSnapshot.direction_response.routing,
+  );
+  recoveredScenePlanAvailable = hasDirectionResponse;
+  if (typeof sceneSnapshot?.screenplay === 'string') {
+    $('#screenplay').value = sceneSnapshot.screenplay;
+  }
+  if (typeof sceneSnapshot?.creative_intent === 'string') {
+    $('#mood').value = sceneSnapshot.creative_intent;
+  }
+  if (hasDirectionResponse) {
+    renderDirectedResult(
+      sceneSnapshot.direction_response,
+      {
+        scene_key: sceneSnapshot.scene_key,
+        source_signature: sceneSnapshot.source_signature,
+      },
+    );
+  } else {
+    setRequestState('complete', 'COMPLETE', 'GENERATED VIDEO READY');
+    const source = $('#analysisSource');
+    if (source) {
+      source.hidden = true;
+      source.dataset.state = 'complete';
+    }
+    conservativePlanConfirmed = false;
+    data = null;
+    renderVideoProviderCopy();
+  }
+}
+
+function resetProgress() {
+  // Progress activity remains available in the response state; the redundant
+  // development strip is intentionally not rendered in the product surface.
 }
 
 function renderProgress(activity = []) {
@@ -322,6 +432,7 @@ function renderProgress(activity = []) {
     }
   });
   const steps = [...document.querySelectorAll('.progress-step')];
+  if (!steps.length) return;
   if (!activity.length) {
     resetProgress();
     return;
@@ -351,8 +462,9 @@ function renderProgress(activity = []) {
 }
 
 function renderLoadingProgress() {
-  resetProgress();
   const first = document.querySelector('.progress-step[data-step="ANALYSE"]');
+  if (!first) return;
+  resetProgress();
   first.dataset.state = 'active';
   $('#progressSummary').textContent = 'Analysing composition';
 }
@@ -374,14 +486,17 @@ function renderResponseStatus(result) {
       : 'complete';
     source.hidden = false;
   }
-  setStatusLabel('#cacheStatus', cached ? 'Cached result' : 'Fresh pass', cached ? 'cached' : 'ready');
+  setTextIfPresent(
+    '#analysisSourcePlan',
+    result.analysis_source === 'deterministic_fallback' ? 'FALLBACK' : 'GROUNDED',
+  );
   if (rateLimited || deterministicFallback || legacy) {
-    setRequestState('fallback', 'RATE-LIMITED', 'LOCAL FALLBACK READY');
+    setRequestState('fallback', 'LOCAL FALLBACK', 'LOCAL FALLBACK READY');
     const fallbackDetail = result.activity.find(item => item.step === 'FALLBACK')?.detail;
-    $('#progressSummary').textContent = fallbackDetail || 'Local fallback ready';
+    setTextIfPresent('#progressSummary', fallbackDetail || 'Local fallback ready');
   } else {
     setRequestState('complete', 'COMPLETE', 'MOTION PREVIEW READY');
-    $('#progressSummary').textContent = 'Motion Preview ready · Director’s Cut ready after approval';
+    setTextIfPresent('#progressSummary', 'Motion Preview ready · Director’s Cut ready after approval');
   }
 }
 
@@ -485,10 +600,26 @@ function renderVideoState(kind) {
   const critiqueButton = kind === 'first_cut' ? $('#analyseFirstCut') : null;
   const video = $(ids.video);
   const placeholder = $(ids.placeholder);
-  if (!card || !button) return;
-  const label = kind === 'director_cut' && state.status === 'not_generated'
-    ? 'OPTIONAL — NOT GENERATED'
+  if (!card) return;
+  const request = kind === 'first_cut' ? $('#firstCutRequest') : null;
+  const label = kind === 'director_cut'
+    ? 'Director’s Cut — Optional'
     : VIDEO_STATUS_LABELS[state.status] || 'FAILED';
+  if (kind === 'director_cut') {
+    card.hidden = videoStates.first_cut.status !== 'completed';
+    card.dataset.status = state.status;
+    $(ids.status).textContent = label;
+    setTextIfPresent(
+      ids.message,
+      'Unavailable in this demo',
+    );
+    renderOutputMode();
+    renderVideoProviderCopy();
+    renderGenerateVeoButton();
+    return;
+  }
+  if (!button || !video || !placeholder) return;
+  if (request) request.hidden = state.status === 'completed';
   const directorAllowanceUnavailable = kind === 'director_cut'
     && state.status === 'not_generated'
     && isVertexVideoProvider()
@@ -504,6 +635,7 @@ function renderVideoState(kind) {
   if (state.status === 'completed' && state.output?.url && video.src !== new URL(state.output.url, window.location.href).href) {
     video.src = `${state.output.url}?job=${encodeURIComponent(state.job_id)}`;
   }
+  if (state.status === 'completed') outputMode = 'first_cut';
   const busy = ['queued', 'generating'].includes(state.status);
   const firstReady = videoStates.first_cut.status === 'completed';
   const directorReady = firstReady && revisionApproved;
@@ -516,19 +648,6 @@ function renderVideoState(kind) {
   if (kind === 'first_cut') {
     button.disabled = !firstCutEligible;
     button.hidden = state.status === 'completed';
-  } else {
-    button.disabled = !data
-      || !healthLoaded
-      || isLegacyDirection()
-      || busy
-      || state.status === 'submission_unknown'
-      || state.status === 'completed'
-      || (state.status === 'failed' && !hasAvailableReplacementAuthorization())
-      || globalExhausted
-      || (kind === 'director_cut' && directorExhausted)
-      || (kind === 'director_cut' && !directorReady)
-      || (isVertexVideoProvider() && !hasStoryboardImage());
-    button.hidden = directorAllowanceUnavailable;
   }
   if (kind === 'first_cut' && !firstCutEligible) {
     $(ids.message).replaceChildren(document.createTextNode(firstCutDisabledReason()));
@@ -546,15 +665,11 @@ function renderVideoState(kind) {
     setTextIfPresent(
       '#firstCutProviderLabel',
       state.provider === 'vertex'
-        ? `Vertex AI Veo · ${state.model || videoModel || DEFAULT_VEO_MODEL} · 8-second First Cut`
-        : 'Demo generation · 8-second First Cut',
+        ? `Vertex AI Veo · ${state.model || videoModel || DEFAULT_VEO_MODEL} · 8 seconds`
+        : 'Demo generation · 8 seconds',
     );
   }
-  if (kind === 'director_cut' && !directorReady && state.status === 'not_generated') {
-    button.title = 'Complete and explicitly approve the First Cut revision first.';
-  } else {
-    button.removeAttribute('title');
-  }
+  renderOutputMode();
   renderVideoProviderCopy();
   renderGenerateVeoButton();
 }
@@ -569,22 +684,23 @@ function formatVideoTimestamp(seconds) {
 
 function renderVideoCritique(result) {
   videoCritique = result?.status === 'available' ? result : null;
+  const available = result?.status === 'available';
   const panel = $('#videoCritiquePanel');
   const label = $('#videoCritiqueLabel');
   const notice = $('#videoCritiqueNotice');
   const message = $('#videoCritiqueMessage');
   const groups = $('#videoCritiqueGroups');
   if (!panel || !label || !notice || !message || !groups) return;
-  panel.hidden = !result;
+  panel.hidden = !available;
+  if (available) panel.open = true;
   groups.replaceChildren();
-  if (!result) {
+  if (!available) {
     label.textContent = 'NOT ANALYSED';
     notice.textContent = '';
-    message.textContent = 'Analyse the completed First Cut to inspect the actual footage.';
+    message.textContent = 'Analyse the completed generated video to inspect the actual footage.';
     return;
   }
-  const available = result.status === 'available';
-  label.textContent = available ? 'AVAILABLE' : 'UNAVAILABLE';
+  label.textContent = 'AVAILABLE';
   notice.textContent = result.notice || '';
   message.textContent = result.message || 'Video critique unavailable.';
   if (!available) return;
@@ -686,12 +802,14 @@ function resetVideoStates() {
   videoCritique = null;
   videoCritiqueBusy = false;
   durableFirstCutRestored = false;
+  outputMode = 'motion_preview';
   $('#approveRevision').disabled = true;
   $('#videoCritiqueStatus').hidden = true;
   $('#videoCritiqueStatus').textContent = '';
   $('#critiqueAvailability').textContent = 'A completed First Cut will unlock video critique.';
   renderVideoCritique(null);
   renderAllVideoStates();
+  renderOutputMode();
 }
 
 function setRecoveryMessage(message = '') {
@@ -822,6 +940,7 @@ function videoContextPayload() {
 }
 
 function renderDirectedResult(result, identity = null) {
+  recoveredScenePlanAvailable = true;
   data = result;
   conservativePlanConfirmed = currentMotionPlan(result)?.confirmation_required === false;
   resetVideoStates();
@@ -951,9 +1070,10 @@ async function pollVideoJob(kind, jobId) {
     renderVideoState(kind);
     saveRecoverySnapshot();
     if (result.status === 'completed' && kind === 'first_cut') {
-      $('#critiqueAvailability').textContent = 'First Cut complete. Analyse the actual video or review the plan review.';
+      $('#critiqueAvailability').textContent = 'Generated video complete. Analyse the actual video or review the plan review.';
       $('#approveRevision').disabled = false;
-      document.querySelector('[data-tab="critique"]')?.click();
+      outputMode = 'first_cut';
+      renderOutputMode();
     }
     if (['queued', 'generating'].includes(result.status)) {
       videoPollers[kind] = setTimeout(() => pollVideoJob(kind, jobId), 350);
@@ -969,7 +1089,7 @@ function openVideoCritiqueApproval() {
   if (!videoStates.first_cut.job_id || videoStates.first_cut.status !== 'completed' || videoCritiqueBusy) return;
   const dialog = $('#videoCritiqueDialog');
   $('#videoCritiqueCopy').textContent =
-    'This is an explicit request. In demo mode it returns deterministic fixture observations and does not inspect the footage. If live critique is enabled, it sends the completed First Cut to Gemini with the original storyboard, screenplay and approved motion plan for comparison.';
+    'This is an explicit request. In demo mode it returns deterministic fixture observations and does not inspect the footage. If live critique is enabled, it sends the completed generated video to Gemini with the original storyboard, screenplay and approved motion plan for comparison.';
   if (typeof dialog.showModal === 'function') dialog.showModal();
   else dialog.setAttribute('open', '');
 }
@@ -979,7 +1099,7 @@ async function analyseFirstCut() {
   videoCritiqueBusy = true;
   renderVideoState('first_cut');
   $('#videoCritiqueStatus').hidden = false;
-  $('#videoCritiqueStatus').textContent = 'Analysing First Cut…';
+  $('#videoCritiqueStatus').textContent = 'Analysing generated video…';
   try {
     const response = await fetch(
       `/api/video-jobs/${encodeURIComponent(videoStates.first_cut.job_id)}/critique`,
@@ -1316,47 +1436,48 @@ function renderRouting(routing) {
 }
 
 function renderMotionCandidates(plan) {
-  const container = $('#motionCandidates');
-  container.replaceChildren();
+  const entityPanel = $('#sceneEntities');
+  if (entityPanel) entityPanel.hidden = false;
   const groups = [
-    ['Camera', [plan.camera_movement]],
-    ['Characters', plan.movable_characters],
-    ['Objects', plan.movable_objects],
-    ['Environment', plan.environmental_motion],
+    ['cameraMotionPlan', [plan.camera_movement]],
+    ['charactersPlan', plan.movable_characters],
+    ['objectsPlan', plan.movable_objects],
+    ['environmentPlan', plan.environmental_motion],
   ];
-  groups.forEach(([label, candidates]) => {
-    const group = document.createElement('div');
-    group.className = 'motion-group';
-    const heading = document.createElement('strong');
-    heading.textContent = label;
-    group.append(heading);
+  groups.forEach(([targetId, candidates]) => {
+    const container = $(`#${targetId}`);
+    if (!container) return;
+    container.replaceChildren();
     if (!candidates?.length) {
       const empty = document.createElement('span');
-      empty.className = 'motion-empty';
+      empty.className = 'plan-empty';
       empty.textContent = 'None confidently identified';
-      group.append(empty);
+      container.append(empty);
     } else {
       candidates.forEach(candidate => {
         const item = document.createElement('article');
-        item.className = 'motion-item';
+        item.className = 'plan-item';
         const title = document.createElement('div');
-        title.className = 'motion-item-title';
+        title.className = 'plan-item-title';
         const name = document.createElement('b');
         name.textContent = candidate.label;
-        const confidence = document.createElement('small');
-        confidence.textContent = `${Math.round(candidate.confidence * 100)}% · ${candidate.support.replaceAll('_', ' ')}`;
-        title.append(name, confidence);
+        title.append(name);
         const action = document.createElement('p');
         action.textContent = candidate.action;
+        const details = document.createElement('details');
+        const summary = document.createElement('summary');
+        summary.textContent = 'Confidence & evidence';
+        const confidence = document.createElement('small');
+        confidence.textContent = `${Math.round(candidate.confidence * 100)}% confidence · ${candidate.support.replaceAll('_', ' ')}`;
         const evidence = document.createElement('small');
         evidence.textContent = `Visual: ${candidate.visual_evidence} Screenplay: ${candidate.screenplay_evidence}`;
         const bound = document.createElement('small');
-        bound.textContent = `Bound: ${candidate.bound}`;
-        item.append(title, action, evidence, bound);
-        group.append(item);
+        bound.textContent = `Limit: ${candidate.bound}`;
+        details.append(summary, confidence, evidence, bound);
+        item.append(title, action, details);
+        container.append(item);
       });
     }
-    container.append(group);
   });
 }
 
@@ -1469,6 +1590,20 @@ function formatTime(seconds) {
   return `00:${String(Math.floor(seconds)).padStart(2, '0')}`;
 }
 
+function syncFirstCutTime(video) {
+  if (!video || !Number.isFinite(video.duration)) return;
+  $('#time').textContent = `${formatTime(video.currentTime)} / ${formatTime(video.duration)}`;
+  if (videoStates.first_cut.status === 'completed' && outputMode === 'first_cut') {
+    renderGenerationDetails(videoStates.first_cut);
+  }
+}
+
+const firstCutVideoElement = $('#firstCutVideo');
+if (firstCutVideoElement) {
+  firstCutVideoElement.addEventListener('loadedmetadata', () => syncFirstCutTime(firstCutVideoElement));
+  firstCutVideoElement.addEventListener('timeupdate', () => syncFirstCutTime(firstCutVideoElement));
+}
+
 function play() {
   clearInterval(timer);
   stage.classList.remove('playing');
@@ -1499,20 +1634,6 @@ $('#briefToggle').onclick = event => {
   button.title = next ? 'Collapse scene brief' : 'Expand scene brief';
   button.querySelector('.sr-only').textContent = next ? 'Collapse scene brief' : 'Expand scene brief';
   $('#appShell').classList.toggle('brief-collapsed', !next);
-};
-
-$('#howWorks').onclick = () => {
-  const dialog = $('#howWorksDialog');
-  if (typeof dialog.showModal === 'function') dialog.showModal();
-  else dialog.setAttribute('open', '');
-  $('#howWorks').setAttribute('aria-expanded', 'true');
-};
-
-$('#closeHowWorks').onclick = () => {
-  const dialog = $('#howWorksDialog');
-  if (typeof dialog.close === 'function') dialog.close();
-  else dialog.removeAttribute('open');
-  $('#howWorks').setAttribute('aria-expanded', 'false');
 };
 
 $('#toggleDepthDebug').onclick = event => {
@@ -1634,9 +1755,8 @@ $('#direct').onclick = async () => {
     if (canPreview) play();
   } catch (error) {
     setRequestState('error', 'ERROR', error.message);
-    $('#progressSummary').textContent = 'Direction failed';
-    $('#progressDetail').textContent = error.message;
-    $('#progressDetail').hidden = false;
+    setTextIfPresent('#progressSummary', 'Direction failed');
+    setTextIfPresent('#progressDetail', error.message);
     alert(error.message);
   } finally {
     button.disabled = false;
@@ -1657,7 +1777,6 @@ $('#useLocal').onclick = () => {
 
 $('#generateVeo').onclick = () => openVideoApproval('first_cut');
 $('#generateFirstCut').onclick = () => openVideoApproval('first_cut');
-$('#generateDirectorCut').onclick = () => openVideoApproval('director_cut');
 $('#analyseFirstCut').onclick = openVideoCritiqueApproval;
 $('#confirmVideoApproval').onclick = confirmVideoApproval;
 $('#confirmVideoCritique').onclick = () => {
@@ -1718,27 +1837,17 @@ function selectPass(revised) {
   );
   setPassSelection(revised);
   setRequestState('complete', revised ? 'Preview revision ready' : 'Complete', revised ? 'MOTION PREVIEW REVISION READY' : 'MOTION PREVIEW READY');
-  $('#progressSummary').textContent = revised
+  setTextIfPresent('#progressSummary', revised
     ? 'Motion Preview revision ready'
-    : 'Motion Preview ready · Director’s Cut ready after approval';
+    : 'Motion Preview ready · Director’s Cut ready after approval');
   play();
 }
 
 $('#firstPass').onclick = () => selectPass(false);
 $('#version').onclick = () => selectPass(true);
 $('#apply').onclick = () => selectPass(true);
-
-document.querySelectorAll('.tabs button').forEach(button => {
-  button.onclick = () => {
-    document.querySelectorAll('.tabs button').forEach(tab => {
-      tab.classList.toggle('active', tab === button);
-      tab.setAttribute('aria-selected', String(tab === button));
-    });
-    $('#directionTab').hidden = button.dataset.tab !== 'direction';
-    $('#depthTab').hidden = button.dataset.tab !== 'depth';
-    $('#critiqueTab').hidden = button.dataset.tab !== 'critique';
-  };
-});
+$('#motionPreviewOutput').onclick = () => selectOutput('motion_preview');
+$('#firstCutOutput').onclick = () => selectOutput('first_cut');
 
 function closeVideoDialogs() {
   pendingVideoKind = null;
@@ -1866,7 +1975,15 @@ async function restoreLatestCompletedFirstCut() {
     if (!result || result.status !== 'completed') return;
 
     durableFirstCutRestored = true;
+    const sceneSnapshot = result.scene_snapshot;
+    if (sceneSnapshot?.direction_response) {
+      renderRecoveredSceneView(sceneSnapshot);
+    } else {
+      resetVideoStates();
+      renderRecoveredSceneView(sceneSnapshot);
+    }
     videoStates.first_cut = result;
+    outputMode = 'first_cut';
     videoSceneKey = result.scene_key || videoSceneKey;
     videoSourceSignature = result.source_signature || videoSourceSignature;
     revisionApproved = Boolean(result.revision_approved);
@@ -1876,8 +1993,10 @@ async function restoreLatestCompletedFirstCut() {
         : null;
       renderVideoCritique(result.video_critique);
     }
+    setRequestState('complete', 'COMPLETE', 'GENERATED VIDEO READY');
     renderVideoState('first_cut');
     renderVideoState('director_cut');
+    renderOutputMode();
     saveRecoverySnapshot();
   } catch {
     // Durable recovery is additive; the existing local recovery path remains usable.

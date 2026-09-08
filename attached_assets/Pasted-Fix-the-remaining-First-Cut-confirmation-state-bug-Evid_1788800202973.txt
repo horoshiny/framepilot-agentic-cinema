@@ -1,0 +1,43 @@
+Fix the remaining First Cut confirmation-state bug.
+
+Evidence from the current UI:
+
+* Normal First Cut allowance: `1 used / 0 remaining`
+* Authorized replacement: `1 remaining`
+* The page still displays `CONFIRMATION NEEDED`
+* Generate First Cut remains disabled after clicking `Use conservative plan`
+
+Therefore replacement eligibility is present; the confirmation state is still blocking `canOpenFirstCutApproval()`.
+
+Inspect the click handler and every confirmation value used by:
+
+* `hasApprovedMotionPlan()`
+* `canOpenFirstCutApproval()`
+* `firstCutSubmissionBlocked()`
+* `renderMotionPlan()`
+* `renderAllVideoStates()`
+* recovery snapshot save/restore
+
+Identify whether the click updates `data.plan.motion_plan.confirmation_required` while another location—such as `data.motion_plan`, `data.plan.confirmation_required`, cached direction data, or restored state—remains true and is used by the button gate.
+
+Implement one canonical confirmation source:
+
+1. Clicking `Use conservative plan` must set the exact confirmation field read by all button and status checks to `false`.
+2. Persist that updated state through the existing recovery snapshot.
+3. Rerender both the motion-plan panel and all video states.
+4. The `CONFIRMATION NEEDED` label must immediately disappear.
+5. With:
+
+   * a valid current motion plan,
+   * session-bound storyboard handle,
+   * Vertex provider,
+   * model `veo-3.1-generate-001`,
+   * matching available replacement authorization,
+   * and no active First Cut job,
+
+   `Generate First Cut` must become enabled even though normal allowance is `0 remaining`.
+6. Add a browser regression test covering this exact sequence.
+7. Do not rerun Direct, create an approval/job, consume the replacement, change allowances, or call Google services.
+8. Run the mock-only suite and restart the managed workflow once.
+
+Report the exact stale/duplicate confirmation field that caused the problem and confirm the final button-gate values.

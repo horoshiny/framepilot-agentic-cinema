@@ -1,0 +1,106 @@
+Do not merge yet. The layout is substantially better, but make these final submission corrections on the same cleanup branch.
+
+1. Remove the duplicate six-step `Agent progress` strip
+
+The page already has the three-stage workflow:
+
+`Direct Scene → Motion Preview → First Cut`
+
+Remove the bottom Analyse / Route / Direct / Animate / Critique / Revise progress strip entirely. It duplicates the workflow and makes the interface confusing.
+
+Also remove:
+
+* `How FramePilot works`
+* Development-oriented progress messages
+* Any footer copy that does not help a judge understand or use the product
+
+Do not remove internal processing logic—only remove the redundant visible strip.
+
+2. Simplify the header
+
+Remove:
+
+* `LOCAL PROJECT`
+* `Fresh pass`
+* `RATE-LIMITED`
+
+Keep one concise provider indicator:
+
+`Vertex AI connected`
+
+When Vertex is unavailable, show a small meaningful state instead:
+
+`Local fallback`
+
+Do not show both simultaneously.
+
+3. Clean the centre heading
+
+Replace technical labels such as:
+
+* `OUTPUT 01`
+* `PLAN MULTIMODAL`
+
+with a clear heading based on the selected view:
+
+* `Motion Preview`
+* `First Cut`
+
+Keep the three-stage indicator concise and visually secondary.
+
+4. Verify the real recovered First Cut
+
+The screenshot currently uses a mocked completed video. Perform a read-only live UI verification using the existing durable completed job:
+
+* Job: `video-2eed1d13ff0842f8aafa095ee12536fc`
+* Expected status: `completed`
+* Model: `veo-3.1-generate-001`
+* Existing video endpoint:
+  `/api/video-jobs/video-2eed1d13ff0842f8aafa095ee12536fc/video`
+
+Do not hardcode the job into general frontend behavior. Use the existing session-safe durable recovery path.
+
+Do not call:
+
+* Direct
+* Gemini
+* `generate_videos`
+* `operations.get`
+* Cloud Storage
+* Approval or job-creation endpoints
+
+The video has already been recovered locally. Only verify that the existing application video endpoint loads inside the UI.
+
+Confirm:
+
+* The First Cut card displays `COMPLETED`.
+* The native video plays.
+* The duration is approximately eight seconds—not the mocked two-second fixture.
+* Refreshing the page restores the same completed First Cut.
+* No new provider or generation request occurs.
+* No browser-console errors appear.
+
+5. Preserve the compact Director’s Cut card
+
+Keep:
+
+`Director’s Cut — Optional`
+
+`Unavailable in this demo`
+
+Do not show an empty player, allowance banner or disabled generation button.
+
+6. Final verification and screenshots
+
+Run the complete mock-only test suite again.
+
+Provide:
+
+* A clean full-page screenshot without the six-step Agent progress strip
+* A live screenshot of the real recovered First Cut playing inside the UI
+* Video duration observed
+* Browser-console result
+* Test total
+* Final cleanup-branch commit hash
+
+Do not merge or push the cleanup branch until I approve this final screenshot.

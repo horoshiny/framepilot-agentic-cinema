@@ -1,0 +1,52 @@
+Implement only the missing frontend wiring for the real Vertex First Cut path.
+
+Current backend state is already correct:
+
+* `/api/health` returns `video_provider: "vertex"`
+* `ALLOW_VEO_GENERATION=true`
+* One global and one per-IP First Cut remain available
+* Director’s Cut limit is 0
+* Live critique is disabled
+* Storage preflight passes
+
+Requirements:
+
+1. Remove hardcoded demo-only wording when `/api/health` reports `video_provider: "vertex"`.
+2. Retain demo wording when the provider is `mock`.
+3. In Vertex mode, label the output “First Cut,” not “Demo generation.”
+4. Enable “Generate with Veo” only when:
+
+   * direction data and approved motion plan exist;
+   * the real provider is available;
+   * global and per-IP allowance remain;
+   * no First Cut already exists;
+   * no generation is active or submission_unknown.
+5. Wire “Generate with Veo” to the existing First Cut approval flow. Do not create a second submission path or bypass existing safeguards.
+6. The approval modal must show:
+
+   * “Generate First Cut”
+   * the exact approved motion plan
+   * 8-second, video-only output
+   * model `veo-3.0-generate-001`
+   * estimated generation cost: approximately ₹152.87
+   * “One Veo generation request and the remaining First Cut allowance will be used.”
+   * Approve and Cancel buttons
+7. Approval must still be created and consumed through the existing backend endpoints.
+8. Never submit automatically. Opening the modal must consume no allowance.
+9. Keep duplicate protection, atomic reservation, `submission_unknown`, caching, session ownership, timeout handling and storage preflight unchanged.
+10. Do not enable Director’s Cut or live critique.
+11. Do not change limits, IAM, secrets, model, region, ledger contents or storage.
+12. Use mocked backend responses for all tests. Do not call Google, Gemini, Vertex AI, Veo or Cloud Storage.
+13. Add browser tests proving:
+
+* Vertex health enables the button only after direction is ready.
+* Clicking it only opens the approval modal.
+* Cancel sends no approval or generation request and consumes nothing.
+* Approve sends exactly one approval and one job-submission request.
+* Double-clicking cannot create two jobs.
+* Mock health retains demo-only copy.
+* Completed, failed, exhausted and submission_unknown states block another submission.
+
+14. Run the full test suite and restart the workflow. Report the sanitized health and allowance responses.
+
+Do not perform a real generation during implementation or testing.

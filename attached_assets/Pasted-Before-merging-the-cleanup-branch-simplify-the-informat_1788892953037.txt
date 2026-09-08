@@ -1,0 +1,125 @@
+Before merging the cleanup branch, simplify the information architecture. The current interface still repeats the same workflow through top tabs, Inspector tabs and separate video panels.
+
+Do not change backend behavior, completed-video recovery, Gemini analysis, Motion Preview, safety validation, job records or allowance accounting. Do not call any external provider.
+
+Create one clear three-stage workflow:
+
+`1. Direct Scene → 2. Motion Preview → 3. First Cut`
+
+Remove the existing long navigation containing:
+
+* Scene brief
+* Agent direction
+* Image-aware depth
+* Motion Preview
+* First Cut
+* Critic
+* Director’s Cut
+
+Do not retain duplicate navigation elsewhere.
+
+Use this final layout:
+
+1. Left panel — Scene Input
+
+* Screenplay
+* Creative intent
+* Storyboard upload
+* Direct Scene button
+
+2. Centre workspace — Visual Output
+
+Before Direct:
+
+* Display the uploaded storyboard.
+
+After Direct:
+
+* Display the local Motion Preview with its play control.
+
+When a completed First Cut exists:
+
+* Display the real Veo video in the same centre workspace.
+* Provide a simple `Motion Preview | First Cut` switch.
+* Default to `First Cut` when the durable completed video has been restored.
+
+3. Right panel — Scene Plan
+
+Remove the `Direction`, `Depth` and `Critique` tabs.
+
+Replace them with one scrollable panel containing compact sections:
+
+* Creative Direction
+* Main Characters
+* Objects
+* Environment
+* Camera & Motion
+* Evidence & Limits
+
+Show concise information by default. Put confidence scores and detailed evidence inside expandable sections.
+
+Do not repeat the same direction text in multiple places.
+
+4. First Cut Review
+
+If critique exists, show it directly below the completed First Cut video in a compact expandable section called `First Cut Review`.
+
+Do not keep `Critic` as a global tab.
+
+If critique does not exist, do not show a disabled or empty critique panel.
+
+5. Director’s Cut
+
+Director’s Cut must not appear as a primary tab, Inspector tab or large empty video card.
+
+Show only one compact card after the First Cut Review:
+
+`Director’s Cut`
+
+`Optional — unavailable in this demo`
+
+`A revised version can be generated after First Cut review when additional Veo allowance is available.`
+
+Do not show an empty video player or disabled generation button.
+
+6. Conservative plan
+
+Keep its backend safety enforcement.
+
+Only show `Use conservative plan` before an available Veo generation when confirmation is genuinely required. Do not show it for Motion Preview-only use, after confirmation, or when the completed First Cut is visible.
+
+7. Completed-video priority
+
+The existing completed First Cut must remain visible and playable after refresh:
+
+* Job: `video-2eed1d13ff0842f8aafa095ee12536fc`
+* Status: `completed`
+* Model: `veo-3.1-generate-001`
+* Video endpoint: `/api/video-jobs/video-2eed1d13ff0842f8aafa095ee12536fc/video`
+
+Do not hardcode this job for all users. Restore the latest completed First Cut belonging to the current client/session through the existing secure recovery path.
+
+Add mocked browser tests confirming:
+
+* Exactly three primary stages are shown.
+* No duplicate workflow tab bars remain.
+* Inspector tab switching is removed.
+* Scene Plan still displays characters, objects, environment and camera information.
+* Motion Preview and completed First Cut can be switched in the centre.
+* Completed First Cut is selected by default after restoration.
+* The real video remains playable after refresh.
+* Director’s Cut is compact and has no empty player.
+* No provider, Direct, approval or generation request occurs during restoration or navigation.
+
+Run the complete mock-only suite and restart once.
+
+Then provide:
+
+* A full-page screenshot of the final interface
+* A screenshot showing the completed First Cut playing
+* Test results
+* Browser-console result
+* Changed files
+* Cleanup-branch commit hash
+
+Do not merge or push this cleanup branch into the stable branch until I approve the screenshots.
