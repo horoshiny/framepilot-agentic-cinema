@@ -3,36 +3,95 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>FramePilot — Agentic Previsualisation</title>
+  <title>FramePilot — Cinematic workspace</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/cinematic.css">
 </head>
 <body>
-  <header>
-    <div><span class="mark">FP</span><strong>FramePilot</strong><small>AGENTIC PREVISUALISATION</small></div>
-    <span id="mode" class="pill">DEMO MODE</span>
+  <header class="topbar">
+    <div class="brand-lockup">
+      <span class="mark" aria-hidden="true">FP</span>
+      <div>
+        <strong>FramePilot</strong>
+        <small>CINEMATIC WORKSPACE</small>
+      </div>
+    </div>
+    <div class="topbar-status" aria-label="Project status">
+      <span id="projectStatus" class="project-status"><i></i> LOCAL PROJECT</span>
+      <span id="mode" class="dot-status mode-status" data-state="loading"><i></i><span class="status-label">Checking environment…</span></span>
+      <span id="requestStatus" class="dot-status" data-state="ready"><i></i><span class="status-label">Ready</span></span>
+      <span id="cacheStatus" class="dot-status" data-state="ready"><i></i><span class="status-label">No cache</span></span>
+    </div>
   </header>
-  <main>
-    <aside class="panel inputs">
-      <div class="eyebrow">01 · SOURCE</div>
-      <label>Screenplay excerpt</label>
-      <textarea id="screenplay">EXT. FOREST CABIN — NIGHT
+
+  <main id="appShell" class="app-shell">
+    <aside id="sceneBrief" class="scene-brief">
+      <div class="panel-head">
+        <div>
+          <span class="eyebrow">01 · Source</span>
+          <h1>Scene brief</h1>
+        </div>
+        <button id="briefToggle" class="icon-button" type="button" aria-expanded="true" aria-controls="briefContent" title="Collapse scene brief">
+          <span aria-hidden="true">‹</span><span class="sr-only">Collapse scene brief</span>
+        </button>
+      </div>
+      <div id="briefContent" class="brief-content">
+        <p class="panel-intro">Give the director the moment, then let the frame do the talking.</p>
+        <div class="field-group">
+          <label for="screenplay">Screenplay excerpt</label>
+          <textarea id="screenplay">EXT. FOREST CABIN — NIGHT
 
 Mara raises the lantern. Beyond the trees, a door stands open although no one has entered. She takes one careful step forward. The flame bends toward the darkness.</textarea>
-      <label>Creative intent</label>
-      <input id="mood" value="uneasy anticipation">
-      <label class="upload">Storyboard image<input id="image" type="file" accept="image/png,image/jpeg,image/webp"><span>Choose image</span></label>
-      <button id="direct">DIRECT THIS SCENE</button>
-      <p class="hint">A bundled cinematic scene is used until you upload an image.</p>
+          <small class="field-note">Describe what the camera can see and feel.</small>
+        </div>
+        <div class="field-group">
+          <label for="mood">Creative intent</label>
+          <input id="mood" value="uneasy anticipation">
+          <small class="field-note">The emotional lens for this shot.</small>
+        </div>
+        <div class="field-group">
+          <label for="image" class="upload">
+            <span class="upload-copy">
+              <strong>Storyboard image</strong>
+              <small id="uploadState">Optional · PNG, JPG or WebP</small>
+            </span>
+            <span class="upload-action">Choose image</span>
+            <input id="image" type="file" accept="image/png,image/jpeg,image/webp">
+          </label>
+        </div>
+        <button id="direct" class="primary-action" type="button">
+          <span>Direct scene</span><span aria-hidden="true">↗</span>
+        </button>
+        <p class="privacy-note">Your storyboard stays in this session. A bundled scene is used until you upload an image.</p>
+      </div>
     </aside>
 
-    <section class="workspace">
-      <div class="toolbar"><span>SHOT 01</span><span id="time">00:00 / 00:08</span></div>
-      <div id="stage" class="stage">
+    <section class="workspace" aria-label="Cinematic stage">
+      <div class="workspace-header">
+        <div>
+          <span class="eyebrow">SHOT 01</span>
+          <span id="stateLabel" class="state-label">READY TO DIRECT</span>
+        </div>
+        <span id="analysisSource" class="analysis-source" hidden></span>
+        <span id="time" class="timecode">00:00 / 00:08</span>
+      </div>
+      <div class="product-story" aria-label="FramePilot workflow">
+        <span>Scene brief</span><span>Agent direction</span><span>Image-aware depth</span><span>Motion Preview</span><span>First Cut</span><span>Critic</span><span>Director’s Cut</span>
+      </div>
+
+      <div id="stage" class="stage" data-state="empty">
+        <div id="stageState" class="stage-state">
+          <span class="stage-state-mark" aria-hidden="true"></span>
+          <strong>Upload a frame to begin.</strong>
+          <small>Or direct the bundled scene from the brief.</small>
+        </div>
         <div id="uploadedScene" class="uploaded-scene" hidden>
+          <div class="image-backing"></div>
           <div class="image-plane image-back"></div>
           <div class="image-plane image-mid"></div>
           <div class="image-plane image-front"></div>
+          <canvas class="depth-debug-overlay" aria-hidden="true"></canvas>
           <canvas id="particleCanvas" class="particles" aria-hidden="true"></canvas>
           <div class="agent-fog fog-near"></div>
           <div class="agent-fog fog-far"></div>
@@ -48,35 +107,248 @@ Mara raises the lantern. Beyond the trees, a door stands open although no one ha
         <div class="vignette"></div>
         <div class="shadow-wipe"></div>
       </div>
+
       <div class="transport">
-        <button id="play" class="round">▶</button>
-        <div class="track"><div id="progress"></div></div>
-        <button id="version" class="secondary">FIRST PASS</button>
+        <button id="play" class="play-button" type="button" aria-label="Play shot">▶</button>
+        <div class="track" aria-hidden="true"><div id="progress"></div></div>
+        <div class="pass-selector" role="tablist" aria-label="Motion Preview version">
+          <button id="firstPass" class="pass-button active" type="button" role="tab" aria-selected="true">Motion Preview</button>
+          <button id="version" class="pass-button" type="button" role="tab" aria-selected="false" disabled>Preview revision</button>
+        </div>
       </div>
-      <div id="activity" class="activity"></div>
+
+      <section id="videoWorkspace" class="video-workspace" aria-label="Video generation">
+        <div class="video-workspace-head">
+          <div>
+            <span class="eyebrow">VIDEO OUTPUT</span>
+            <h2>Storyboard to video</h2>
+          </div>
+          <span id="videoProviderLabel" class="demo-label">Checking provider…</span>
+        </div>
+        <p id="videoIntro" class="video-intro">Motion Preview stays local. These isolated video states use a bundled fixture and never call Veo.</p>
+        <p id="videoAllowanceMessage" class="video-allowance-message" hidden></p>
+        <p id="videoRecoveryMessage" class="video-recovery-message" hidden></p>
+        <div class="video-grid">
+          <article class="video-card" data-video-kind="first_cut">
+            <div class="video-card-head">
+              <div><span class="video-kicker">FIRST CUT</span><strong id="firstCutStatus">NOT GENERATED</strong></div>
+              <small id="firstCutProviderLabel">Demo generation</small>
+            </div>
+            <div class="video-frame">
+              <video id="firstCutVideo" controls playsinline preload="metadata" hidden></video>
+              <div id="firstCutPlaceholder" class="video-placeholder">Approval required</div>
+            </div>
+             <p id="firstCutMessage" class="video-message">Approve a mocked First Cut to begin.</p>
+            <button id="generateFirstCut" class="secondary" type="button" disabled>Generate First Cut</button>
+             <button id="analyseFirstCut" class="secondary" type="button" disabled>Analyse First Cut</button>
+             <p id="videoCritiqueStatus" class="video-message" hidden></p>
+          </article>
+          <article class="video-card" data-video-kind="director_cut">
+            <div class="video-card-head">
+              <div><span class="video-kicker">DIRECTOR’S CUT</span><strong id="directorCutStatus">OPTIONAL — NOT GENERATED</strong></div>
+              <small id="directorCutProviderLabel">Optional stage</small>
+            </div>
+            <div class="video-frame">
+              <video id="directorCutVideo" controls playsinline preload="metadata" hidden></video>
+              <div id="directorCutPlaceholder" class="video-placeholder">No Director’s Cut allowance available</div>
+            </div>
+            <p id="directorCutMessage" class="video-message">A revised cut can be generated after First Cut critique when additional Veo allowance is available.</p>
+            <button id="generateDirectorCut" class="secondary" type="button" disabled>Generate Director’s Cut</button>
+          </article>
+        </div>
+      </section>
+
+      <section class="agent-progress" aria-label="Agent progress">
+        <div class="progress-header">
+          <span class="eyebrow">Agent progress</span>
+          <span id="progressSummary">Waiting for a scene</span>
+        </div>
+        <div class="progress-steps" role="list">
+          <button class="progress-step" type="button" data-step="ANALYSE" role="listitem" title="Analyse">
+            <i>1</i><span>Analyse</span>
+          </button>
+          <button class="progress-step" type="button" data-step="ROUTE" role="listitem" title="Route">
+            <i>2</i><span>Route</span>
+          </button>
+          <button class="progress-step" type="button" data-step="DIRECT" role="listitem" title="Direct">
+            <i>3</i><span>Direct</span>
+          </button>
+          <button class="progress-step" type="button" data-step="ANIMATE" role="listitem" title="Animate">
+            <i>4</i><span>Animate</span>
+          </button>
+          <button class="progress-step" type="button" data-step="CRITIQUE" role="listitem" title="Critique">
+            <i>5</i><span>Critique</span>
+          </button>
+          <button class="progress-step" type="button" data-step="REVISE" role="listitem" title="Revise">
+            <i>6</i><span>Revise</span>
+          </button>
+        </div>
+        <p id="progressDetail" class="progress-detail" hidden></p>
+        <button id="howWorks" class="how-works" type="button" aria-expanded="false" aria-controls="howWorksDialog">
+          <span class="info-glyph" aria-hidden="true">i</span> How FramePilot works
+        </button>
+      </section>
     </section>
 
-    <aside class="panel direction">
-      <div class="tabs"><button class="active" data-tab="plan">DIRECTOR</button><button data-tab="critique">CRITIC</button></div>
-      <div id="planTab">
-        <div class="eyebrow">02 · SHOT PLAN</div>
-        <h2 id="intent">Uneasy anticipation</h2>
-        <p id="rationale">Generate a direction to reveal the agent's cinematic rationale.</p>
-        <div class="metric"><span>Camera</span><b id="camera">Slow push-in</b></div>
-        <label>Duration <output id="durationOut">8s</output></label><input id="duration" type="range" min="3" max="20" step=".5" value="8">
-        <label>Zoom <output id="zoomOut">1.16×</output></label><input id="zoom" type="range" min="1" max="1.35" step=".01" value="1.16">
-        <label>Parallax <output id="parallaxOut">46%</output></label><input id="parallax" type="range" min="0" max="1" step=".01" value=".46">
-        <label>Motion <output id="motionOut">38%</output></label><input id="motion" type="range" min="0" max="1" step=".01" value=".38">
+    <aside class="inspector" aria-label="Shot inspector">
+      <div class="inspector-header">
+        <span class="eyebrow">INSPECTOR</span>
+        <span class="inspector-shot">SHOT 01</span>
       </div>
-      <div id="critiqueTab" hidden>
-        <div class="eyebrow">03 · SELF-CRITIQUE</div>
+      <div class="tabs" role="tablist" aria-label="Shot inspector sections">
+        <button class="active" type="button" role="tab" aria-selected="true" aria-controls="directionTab" data-tab="direction">Direction</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="depthTab" data-tab="depth">Depth</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="critiqueTab" data-tab="critique">Critique</button>
+      </div>
+
+      <div id="directionTab" class="inspector-tab">
+        <div class="tab-kicker">Emotional intent</div>
+        <h2 id="intent">Uneasy anticipation</h2>
+        <p id="rationale" class="rationale">Generate a direction to reveal the agent’s cinematic rationale.</p>
+        <div class="inspector-metric"><span>Camera</span><strong id="camera">Slow push-in</strong></div>
+        <div class="inspector-metric"><span>Grammar</span><strong id="grammar">Balanced</strong></div>
+        <div class="signature-block">
+          <div class="block-heading"><span>Shot signature</span><small id="shotSignature">Standby</small></div>
+          <p id="diversityNote" hidden></p>
+        </div>
+        <details id="fineTune" class="fine-tune">
+          <summary>Fine-tune motion <span>⌄</span></summary>
+          <div class="fine-tune-content">
+            <label for="duration">Duration <output id="durationOut">8s</output></label>
+            <input id="duration" type="range" min="3" max="20" step=".5" value="8">
+            <label for="zoom">Zoom <output id="zoomOut">1.16×</output></label>
+            <input id="zoom" type="range" min="1" max="1.35" step=".01" value="1.16">
+            <label for="parallax">Parallax <output id="parallaxOut">46%</output></label>
+            <input id="parallax" type="range" min="0" max="1" step=".01" value=".46">
+            <label for="motion">Motion <output id="motionOut">38%</output></label>
+            <input id="motion" type="range" min="0" max="1" step=".01" value=".38">
+          </div>
+        </details>
+        <div id="routingCard" class="routing-card" hidden>
+          <div class="tab-kicker">ACTION ROUTER</div>
+          <strong id="routingDecision"></strong>
+          <p id="routingRationale"></p>
+          <strong id="routingStatus" class="routing-status" hidden>LOCAL 2.5D APPROXIMATION SELECTED</strong>
+          <div id="approvalPanel" class="approval-panel" hidden>
+            <p>This action needs generative video for a faithful result. No generation request has been made.</p>
+            <div class="approval-actions">
+              <button id="useLocal" class="secondary" type="button">Use local 2.5D instead</button>
+              <button id="generateVeo" class="secondary" disabled type="button">Generate with Veo</button>
+            </div>
+            <small>Cost approval required.</small>
+          </div>
+        </div>
+        <section id="motionPlan" class="motion-plan" hidden aria-live="polite">
+          <div class="block-heading">
+            <span>Scene-grounded motion</span>
+            <small id="motionPlanStatus">CONSERVATIVE</small>
+          </div>
+          <p id="motionGrounding" class="motion-grounding"></p>
+          <div id="motionCandidates" class="motion-candidates"></div>
+          <div class="motion-boundary">
+            <strong>Preserve</strong>
+            <ul id="motionPreserved"></ul>
+          </div>
+          <div class="motion-boundary">
+            <strong>Do not change</strong>
+            <ul id="motionProhibited"></ul>
+          </div>
+          <div id="motionConfirmation" class="motion-confirmation" hidden>
+            <p id="motionQuestion"></p>
+            <button id="confirmMotion" class="secondary" type="button">Use conservative plan</button>
+          </div>
+        </section>
+      </div>
+
+      <div id="depthTab" class="inspector-tab" hidden>
+        <div class="tab-kicker">Depth compositor</div>
+        <p class="tab-intro">Layered image movement is mapped from the storyboard or a deterministic scene heuristic.</p>
+        <div id="depthIndicator" class="depth-indicator" aria-label="Depth plane movement strengths">
+          <div class="depth-heading">
+            <span>Plane strength</span>
+            <small><b id="depthSource">HEURISTIC DEPTH</b> · <span id="depthPath">STANDBY</span></small>
+          </div>
+          <div class="depth-plane" data-depth-plane="front">
+            <span>Foreground</span><i><b></b></i><output data-strength-value>—</output>
+          </div>
+          <div class="depth-plane" data-depth-plane="mid">
+            <span>Subject / Midground</span><i><b></b></i><output data-strength-value>—</output>
+          </div>
+          <div class="depth-plane" data-depth-plane="back">
+            <span>Background</span><i><b></b></i><output data-strength-value>—</output>
+          </div>
+          <small id="depthNote" class="depth-note">Deterministic image-space heuristic · 16% overscan</small>
+          <button id="toggleDepthDebug" class="secondary depth-debug-toggle" type="button" aria-pressed="false">
+            Show depth regions
+          </button>
+        </div>
+      </div>
+
+      <div id="critiqueTab" class="inspector-tab" hidden>
+         <div class="tab-kicker">Plan review</div>
         <div id="scores" class="scores"></div>
-        <p id="diagnosis"></p>
-        <div class="revision"><strong>Proposed revision</strong><p id="revisionText"></p></div>
-        <button id="apply" disabled>APPLY REVISION</button>
+         <p id="critiqueAvailability" class="critique-availability">A completed First Cut will unlock video critique.</p>
+        <p id="diagnosis" class="critique-copy">The Critic will assess focus, pacing, motion and restraint after direction.</p>
+        <div class="revision"><strong>Proposed revision</strong><p id="revisionText">No revision has been proposed yet.</p></div>
+        <div id="revisionChanges" class="revision-changes" hidden>
+          <strong>Changes in Director’s Cut</strong>
+          <ul id="revisionChangeList"></ul>
+        </div>
+        <button id="approveRevision" class="secondary revision-approval" type="button" disabled>Approve revision for Director’s Cut</button>
+        <button id="apply" class="primary-action" type="button" disabled>Apply revision to Motion Preview</button>
+         <section id="videoCritiquePanel" class="video-critique-panel" hidden aria-live="polite">
+           <div class="block-heading"><span>Video critique</span><small id="videoCritiqueLabel">NOT ANALYSED</small></div>
+           <p id="videoCritiqueNotice" class="critique-availability"></p>
+           <p id="videoCritiqueMessage" class="critique-copy">Analyse the completed First Cut to inspect the actual footage.</p>
+           <div id="videoCritiqueGroups"></div>
+         </section>
       </div>
     </aside>
   </main>
+  <footer class="about-line">Built with Replit Agent · Gemini on Vertex AI · Cost-safe local fallback.</footer>
+  <dialog id="howWorksDialog" class="how-works-dialog" aria-labelledby="howWorksTitle">
+    <div class="dialog-head">
+      <h2 id="howWorksTitle">How FramePilot works</h2>
+      <button id="closeHowWorks" class="dialog-close" type="button" aria-label="Close">×</button>
+    </div>
+    <p>FramePilot analyses screenplay, intent and storyboard; routes feasible versus generative actions; creates an image-aware depth plan; compiles browser motion; critiques and revises the Motion Preview; and protects cost through caching, limits and local fallback.</p>
+  </dialog>
+  <dialog id="videoApprovalDialog" class="video-approval-dialog" aria-labelledby="videoApprovalTitle">
+    <div class="dialog-head">
+      <h2 id="videoApprovalTitle">Approve demo generation</h2>
+      <button id="closeVideoApproval" class="dialog-close" type="button" aria-label="Close">×</button>
+    </div>
+    <p id="videoApprovalCopy">This creates a mocked video job using only the bundled fixture video. No real Veo or Vertex video request will be made.</p>
+    <p id="videoReplacementNotice" class="approval-warning" hidden></p>
+    <div id="videoApprovalDetails" hidden>
+      <p>Approved motion plan</p>
+      <pre id="videoMotionPlan" class="video-motion-plan"></pre>
+      <ul id="videoGenerationSpec">
+        <li>8-second, video-only output</li>
+        <li>Model <code id="videoGenerationModel">veo-3.1-generate-001</code></li>
+        <li id="videoGenerationEstimate" hidden></li>
+        <li id="videoGenerationAllowance">One Veo generation request and the remaining First Cut allowance will be used.</li>
+      </ul>
+    </div>
+    <p id="videoApprovalWarning" class="approval-warning">The result will be labeled Demo generation and will remain separate from Motion Preview.</p>
+    <div class="dialog-actions">
+      <button id="cancelVideoApproval" class="secondary" type="button">Cancel</button>
+      <button id="confirmVideoApproval" class="primary-action" type="button">Approve and queue</button>
+    </div>
+  </dialog>
+  <dialog id="videoCritiqueDialog" class="video-approval-dialog" aria-labelledby="videoCritiqueTitle">
+    <div class="dialog-head">
+      <h2 id="videoCritiqueTitle">Analyse completed First Cut</h2>
+      <button id="closeVideoCritique" class="dialog-close" type="button" aria-label="Close">×</button>
+    </div>
+    <p id="videoCritiqueCopy">This is a separate analysis of the completed video against the screenplay, storyboard and approved motion plan.</p>
+    <p class="approval-warning">If live critique is enabled, it uses a Gemini request. No automatic analysis or retry will be sent.</p>
+    <div class="dialog-actions">
+      <button id="cancelVideoCritique" class="secondary" type="button">Cancel</button>
+      <button id="confirmVideoCritique" class="primary-action" type="button">Analyse First Cut</button>
+    </div>
+  </dialog>
+  <script src="/static/compositor.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

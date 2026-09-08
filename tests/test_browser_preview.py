@@ -1,0 +1,1024 @@
+import os
+import shutil
+import json
+import time
+from pathlib import Path
+
+import pytest
+
+
+playwright_sync = pytest.importorskip("playwright.sync_api")
+from playwright.sync_api import sync_playwright
+
+from cinema_agent.demo import demo_critique, demo_plan
+
+
+FIXTURE = Path(__file__).parent / "fixtures" / "storyboard.svg"
+BASE_URL = os.getenv("FRAMEPILOT_BASE_URL", "http://127.0.0.1:5000")
+SCREENPLAY = "A figure crosses the empty platform while the signal changes and rain gathers on the glass."
+
+
+def direction_payload(*, provider="vertex"):
+    plan = demo_plan(SCREENPLAY, "rising dread")
+    return {
+        "mode": provider,
+        "analysis_source": (
+            "vertex_multimodal" if provider == "vertex" else "deterministic_fallback"
+        ),
+        "image_handle": "image-test" if provider == "vertex" else None,
+        "depth_source": "heuristic",
+        "plan": plan.model_dump(mode="json"),
+        "critique": demo_critique(plan).model_dump(mode="json"),
+        "routing": {
+            "classification": "GENERATIVE_VIDEO_REQUIRED",
+            "rationale": "The requested subject motion requires generative video.",
+            "matched_actions": ["character movement"],
+        },
+        "activity": [
+            {"step": "ANALYSE", "detail": "Screenplay analysed."},
+            {"step": "ROUTE", "detail": "Generative video required."},
+            {"step": "DIRECT", "detail": "Direction ready."},
+        ],
+        "camera_grammar": "balanced",
+        "shot_signature": None,
+        "diversity_adjustment": None,
+        "revision_camera_grammar": None,
+        "revision_shot_signature": None,
+        "revision_diversity_adjustment": None,
+    }
+
+
+def allowance_payload(
+    *,
+    remaining=1,
+    authorized_replacement_remaining=0,
+    authorized_replacement_for_job_id=None,
+):
+    return {
+        "global_limit": 1,
+        "global_used": 1 - remaining,
+        "global_remaining": remaining,
+        "per_ip_limit": 1,
+        "per_ip_used": 1 - remaining,
+        "per_ip_remaining": remaining,
+        "director_cut_global_limit": 0,
+        "director_cut_global_used": 0,
+        "director_cut_global_remaining": 0,
+        "authorized_replacement_limit": 1 if authorized_replacement_for_job_id else 0,
+        "authorized_replacement_used": (
+            1 - authorized_replacement_remaining
+            if authorized_replacement_for_job_id
+            else 0
+        ),
+        "authorized_replacement_remaining": authorized_replacement_remaining,
+        "authorized_replacement_for_job_id": authorized_replacement_for_job_id,
+    }
+
+
+def video_job_payload(
+    status="completed",
+    *,
+    provider="vertex",
+    job_id="job-test",
+    kind="first_cut",
+    revision_approved=False,
+    output_url=None,
+):
+    completed = status == "completed"
+    return {
+        "job_id": job_id,
+        "kind": kind,
+        "status": status,
+        "scene_key": "scene-test",
+        "source_signature": "source-test",
+        "provider": provider,
+        "created_at": 1,
+        "updated_at": 1,
+        "output": (
+            {
+                "url": output_url or "/static/demo-generation.mp4",
+                "label": "Vertex AI Veo" if provider == "vertex" else "Demo generation",
+                "source": "vertex_veo" if provider == "vertex" else "bundled_fixture",
+                "kind": kind,
+            }
+            if completed
+            else None
+        ),
+        "error": (
+            {
+                "code": "submission_unknown",
+                "message": "Submission status uncertain. No retry sent; allowance remains reserved.",
+            }
+            if status == "submission_unknown"
+            else {"code": "provider_failed", "message": "Video generation failed."}
+            if status == "failed"
+            else None
+        ),
+        "video_critique": None,
+        "revision_approved": revision_approved,
+        "deduplicated": False,
+        "replacement_for_job_id": None,
+    }
+
+
+def mock_video_api(
+    page,
+    *,
+    provider="vertex",
+    remaining=1,
+    authorized_replacement_remaining=0,
+    authorized_replacement_for_job_id=None,
+    job_status="completed",
+    video_estimate="Approximate veo-3.1-generate-001 estimate: deployment-configured",
+    latest_job=None,
+):
+    counts = {"approval": 0, "submission": 0}
+    direction = direction_payload(provider=provider)
+
+    page.route(
+        "**/api/health",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "status": "ok",
+                    "mode": provider,
+                    "video_provider": provider,
+                    "video_model": "veo-3.1-generate-001",
+                    "video_estimate": video_estimate,
+                }
+            ),
+        ),
+    )
+    page.route(
+        "**/api/video-allowance",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                allowance_payload(
+                    remaining=remaining,
+                    authorized_replacement_remaining=authorized_replacement_remaining,
+                    authorized_replacement_for_job_id=authorized_replacement_for_job_id,
+                )
+            ),
+        ),
+    )
+    page.route(
+        "**/api/direct",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(direction),
+        ),
+    )
+
+    def video_route(route):
+        request = route.request
+        path = request.url.split("?", 1)[0]
+        if request.method == "POST" and path.endswith("/api/video-jobs/approval"):
+            counts["approval"] += 1
+            body = json.loads(request.post_data or "{}")
+            kind = body.get("kind", "first_cut")
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "kind": kind,
+                        "scene_key": "scene-test",
+                        "source_signature": "source-test",
+                        "first_cut_job_id": body.get("first_cut_job_id"),
+                        "replacement_for_job_id": body.get("replacement_for_job_id"),
+                        "status": "approval_required",
+                        "approval_id": f"approval-{kind}",
+                        "expires_at": 9999999999,
+                    }
+                ),
+            )
+            return
+        if request.method == "GET" and path.endswith("/api/video-jobs/latest"):
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(latest_job),
+            )
+            return
+        if request.method == "POST" and path.endswith("/api/video-jobs"):
+            counts["submission"] += 1
+            body = json.loads(request.post_data or "{}")
+            kind = body.get("kind", "first_cut")
+            job_id = f"job-{kind}"
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    video_job_payload(
+                        job_status,
+                        provider=provider,
+                        job_id=job_id,
+                        kind=kind,
+                    )
+                ),
+            )
+            return
+        if request.method == "POST" and "/approve-revision" in path:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    video_job_payload(
+                        "completed",
+                        provider=provider,
+                        job_id="job-first_cut",
+                        revision_approved=True,
+                    )
+                ),
+            )
+            return
+        if request.method == "GET" and "/api/video-jobs/job-" in path:
+            kind = "director_cut" if "director_cut" in path else "first_cut"
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    video_job_payload(
+                        job_status,
+                        provider=provider,
+                        job_id=f"job-{kind}",
+                        kind=kind,
+                    )
+                ),
+            )
+            return
+        route.continue_()
+
+    page.route("**/api/video-jobs**", video_route)
+    return counts
+
+
+def test_completed_durable_first_cut_restores_without_generation_and_compacts_directors_cut():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser preview regression test.")
+
+    real_url = "/api/video-jobs/video-durable-first-cut/video"
+    latest = video_job_payload(
+        provider="vertex",
+        job_id="video-durable-first-cut",
+        output_url=real_url,
+    )
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        requests = []
+        page.on("request", lambda request: requests.append((request.method, request.url)))
+        try:
+            mock_video_api(page, provider="vertex", remaining=0, latest_job=latest)
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.wait_for_function(
+                "document.querySelector('#firstCutStatus')?.innerText === 'COMPLETED'"
+            )
+            assert page.locator("#firstCutVideo").is_visible()
+            assert page.locator("#firstCutVideo").get_attribute("src").startswith(real_url)
+            assert page.locator("#firstCutProviderLabel").inner_text() == (
+                "Vertex AI Veo · veo-3.1-generate-001 · 8-second First Cut"
+            )
+            assert page.locator("#generateFirstCut").is_hidden()
+            assert page.locator("#analyseFirstCut").is_enabled()
+            assert page.locator("#videoAllowanceMessage").is_hidden()
+            assert page.locator("#directorCutStatus").inner_text() == "OPTIONAL — NOT GENERATED"
+            assert page.locator("#directorCutMessage").inner_text() == (
+                "A revised cut can be generated after First Cut critique "
+                "when additional Veo allowance is available."
+            )
+            assert page.locator("#directorCutVideo").is_hidden()
+            assert page.locator("#generateDirectorCut").is_hidden()
+            assert page.locator("#generateDirectorCut").is_disabled()
+            assert not any(
+                method == "POST"
+                and any(path in url for path in ("/api/direct", "/api/video-jobs"))
+                for method, url in requests
+            )
+        finally:
+            browser.close()
+
+
+def test_completed_durable_first_cut_wins_over_deterministic_fallback_snapshot():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser preview regression test.")
+
+    latest = video_job_payload(
+        provider="vertex",
+        job_id="video-durable-first-cut",
+        output_url="/api/video-jobs/video-durable-first-cut/video",
+    )
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        requests = []
+        page.on("request", lambda request: requests.append((request.method, request.url)))
+        try:
+            mock_video_api(page, provider="vertex", latest_job=latest)
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.evaluate(
+                """value => sessionStorage.setItem(
+                    'framepilot.video-recovery',
+                    JSON.stringify(value)
+                )""",
+                {
+                    "version": 1,
+                    "scene": {
+                        "scene_key": "scene-fallback",
+                        "source_signature": "source-fallback",
+                    },
+                    "screenplay": SCREENPLAY,
+                    "creative_intent": "rising dread",
+                    "direction_response": direction_payload(provider="mock"),
+                    "video_job_ids": {"first_cut": None, "director_cut": None},
+                },
+            )
+            page.reload(wait_until="networkidle")
+            page.wait_for_function(
+                "document.querySelector('#firstCutStatus')?.innerText === 'COMPLETED'"
+            )
+            assert page.locator("#analysisSource").inner_text() == "Deterministic fallback"
+            assert page.locator("#firstCutVideo").is_visible()
+            assert not any(
+                method == "POST"
+                and any(path in url for path in ("/api/direct", "/api/video-jobs"))
+                for method, url in requests
+            )
+        finally:
+            browser.close()
+
+
+def test_uploaded_preview_is_loaded_without_an_empty_stage_overlay():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser preview regression test.")
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(
+            headless=True,
+            executable_path=chromium,
+        )
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        try:
+            mock_video_api(page, provider="vertex")
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.set_input_files("#image", str(FIXTURE))
+            page.wait_for_function(
+                """() => {
+                    const stage = document.querySelector('#stage');
+                    const scene = document.querySelector('#uploadedScene');
+                    const plane = document.querySelector('.image-plane');
+                    return stage?.dataset.state === 'image-ready'
+                        && scene?.hidden === false
+                        && plane?.style.backgroundImage;
+                }"""
+            )
+
+            metrics = page.evaluate(
+                """async () => {
+                    const stage = document.querySelector('#stage');
+                    const overlay = document.querySelector('#stageState');
+                    const plane = document.querySelector('.image-plane');
+                    const background = getComputedStyle(plane).backgroundImage;
+                    const source = background.match(/^url\\(["']?(.*?)["']?\\)$/)?.[1];
+                    const image = new Image();
+                    image.src = source;
+                    await image.decode();
+                    return {
+                        naturalWidth: image.naturalWidth,
+                        stageState: stage.dataset.state,
+                        overlayDisplay: getComputedStyle(overlay).display,
+                        overlayVisibility: getComputedStyle(overlay).visibility,
+                        planeOpacity: getComputedStyle(plane).opacity,
+                        coveringOverlayDisplay: getComputedStyle(stage, '::after').display,
+                    };
+                }"""
+            )
+            assert metrics["naturalWidth"] > 0
+            assert metrics["stageState"] == "image-ready"
+            assert metrics["overlayDisplay"] == "none"
+            assert metrics["planeOpacity"] == "1"
+            assert metrics["coveringOverlayDisplay"] == "none"
+
+            page.click('[data-tab="depth"]')
+            page.click('[data-tab="direction"]')
+            assert page.get_attribute("#stage", "data-state") == "image-ready"
+            assert page.locator("#stageState").evaluate(
+                "element => getComputedStyle(element).display"
+            ) == "none"
+
+            page.click("#direct")
+            page.wait_for_function(
+                """() => {
+                    const panel = document.querySelector('#motionPlan');
+                    return panel?.hidden === false
+                        && document.querySelector('#motionCandidates')?.textContent;
+                }"""
+            )
+            assert page.locator("#motionPlanStatus").inner_text() == "CONFIRMATION NEEDED"
+            assert "Preserve" in page.locator("#motionPlan").inner_text()
+            assert page.get_attribute("#stage", "data-state") == "completed"
+        finally:
+            browser.close()
+
+
+def test_mocked_video_flow_keeps_cuts_separate_and_requires_revision_approval():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser video flow test.")
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        try:
+            mock_video_api(page, provider="mock")
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.click("#direct")
+            page.wait_for_function("document.querySelector('#stage')?.dataset.state === 'completed'")
+            page.click("#confirmMotion")
+            assert page.locator("#generateFirstCut").is_enabled()
+            assert page.locator("#generateDirectorCut").is_disabled()
+
+            page.click("#generateFirstCut")
+            page.wait_for_function("document.querySelector('#videoApprovalDialog')?.open === true")
+            assert page.locator("#firstCutStatus").inner_text() == "APPROVAL REQUIRED"
+            assert page.locator("#firstCutVideo").is_hidden()
+            page.click("#confirmVideoApproval")
+
+            page.wait_for_function(
+                "document.querySelector('#firstCutStatus')?.innerText === 'COMPLETED'",
+                timeout=10000,
+            )
+            assert page.locator("#firstCutVideo").is_visible()
+            assert "Demo generation" in page.locator("#firstCutMessage").inner_text()
+            assert page.locator("#approveRevision").is_enabled()
+            assert page.locator("#generateDirectorCut").is_disabled()
+
+            page.click("#approveRevision")
+            page.wait_for_function("document.querySelector('#generateDirectorCut')?.disabled === false")
+            page.click("#generateDirectorCut")
+            page.wait_for_function("document.querySelector('#videoApprovalDialog')?.open === true")
+            assert "Director’s Cut" in page.locator("#videoApprovalCopy").inner_text()
+            page.click("#confirmVideoApproval")
+            page.wait_for_function(
+                "document.querySelector('#directorCutStatus')?.innerText === 'COMPLETED'",
+                timeout=10000,
+            )
+            assert page.locator("#directorCutVideo").is_visible()
+            first_src = page.locator("#firstCutVideo").get_attribute("src")
+            director_src = page.locator("#directorCutVideo").get_attribute("src")
+            assert "/static/demo-generation.mp4" in first_src
+            assert "/static/demo-generation.mp4" in director_src
+            assert first_src != director_src
+            assert page.locator("#stage video").count() == 0
+        finally:
+            browser.close()
+
+
+def test_exhausted_real_allowance_disables_first_cut_with_exact_message():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser video flow test.")
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        try:
+            page.route(
+                "**/api/health",
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body='{"status":"ok","mode":"vertex","video_provider":"vertex"}',
+                ),
+            )
+            page.route(
+                "**/api/video-allowance",
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=(
+                        '{"global_limit":1,"global_used":1,"global_remaining":0,'
+                        '"per_ip_limit":1,"per_ip_used":1,"per_ip_remaining":0,'
+                        '"director_cut_global_limit":0,"director_cut_global_used":0,'
+                        '"director_cut_global_remaining":0,'
+                        '"authorized_replacement_limit":0,"authorized_replacement_used":0,'
+                        '"authorized_replacement_remaining":0,'
+                        '"authorized_replacement_for_job_id":null}'
+                    ),
+                ),
+            )
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.wait_for_function(
+                "document.querySelector('#videoAllowanceMessage')?.hidden === false"
+            )
+            assert page.locator("#generateFirstCut").is_disabled()
+            assert page.locator("#videoAllowanceMessage").inner_text() == (
+                "Normal First Cut allowance: 1 used / 0 remaining. "
+                "Authorized replacement: 0 remaining."
+            )
+        finally:
+            browser.close()
+
+
+def test_available_replacement_enables_failed_first_cut_and_explains_credit_use():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser video flow test.")
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        try:
+            mock_video_api(
+                page,
+                provider="vertex",
+                remaining=0,
+                authorized_replacement_remaining=1,
+                authorized_replacement_for_job_id="job-first_cut",
+                job_status="failed",
+            )
+            direction = direction_payload(provider="vertex")
+            snapshot = {
+                "version": 1,
+                "scene": {"scene_key": "scene-test", "source_signature": "source-test"},
+                "screenplay": SCREENPLAY,
+                "creative_intent": "rising dread",
+                "direction_response": direction,
+                "video_job_ids": {"first_cut": "job-first_cut", "director_cut": None},
+            }
+            page.add_init_script(
+                f"""sessionStorage.setItem(
+                    'framepilot.video-recovery', {json.dumps(json.dumps(snapshot))}
+                )"""
+            )
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.wait_for_function(
+                "document.querySelector('#firstCutStatus')?.innerText === 'FAILED'"
+            )
+            page.click("#confirmMotion")
+            assert page.locator("#generateFirstCut").is_enabled()
+            assert "Authorized replacement attempt available" in page.locator(
+                "#videoAllowanceMessage"
+            ).inner_text()
+
+            page.click("#generateFirstCut")
+            page.wait_for_function("document.querySelector('#videoApprovalDialog')?.open === true")
+            assert page.locator("#videoReplacementNotice").is_visible()
+            assert "authorized replacement attempt" in page.locator(
+                "#videoReplacementNotice"
+            ).inner_text()
+            requests = []
+            page.on(
+                "request",
+                lambda request: requests.append(request)
+                if request.method == "POST" and "/api/video-jobs" in request.url
+                else None,
+            )
+            page.click("#confirmVideoApproval")
+            page.wait_for_function(
+                "document.querySelector('#firstCutStatus')?.innerText === 'FAILED'"
+            )
+            approval_payload = json.loads(requests[0].post_data)
+            submission_payload = json.loads(requests[1].post_data)
+            assert approval_payload["replacement_for_job_id"] == "job-first_cut"
+            assert submission_payload["replacement_for_job_id"] == "job-first_cut"
+        finally:
+            browser.close()
+
+
+def test_fresh_direct_preserves_historical_replacement_authorization():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser video flow test.")
+
+    original_job_id = "job-original-failed-123456"
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        try:
+            mock_video_api(
+                page,
+                provider="vertex",
+                remaining=0,
+                authorized_replacement_remaining=1,
+                authorized_replacement_for_job_id=original_job_id,
+                job_status="failed",
+            )
+            direction = direction_payload(provider="vertex")
+            direction["plan"]["motion_plan"]["confirmation_required"] = True
+            snapshot = {
+                "version": 1,
+                "scene": {"scene_key": "scene-test", "source_signature": "source-test"},
+                "screenplay": SCREENPLAY,
+                "creative_intent": "rising dread",
+                "direction_response": direction,
+                "video_job_ids": {"first_cut": original_job_id, "director_cut": None},
+            }
+            page.add_init_script(
+                f"""sessionStorage.setItem(
+                    'framepilot.video-recovery', {json.dumps(json.dumps(snapshot))}
+                )"""
+            )
+            page.route(
+                f"**/api/video-jobs/{original_job_id}",
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        video_job_payload(
+                            "failed",
+                            provider="vertex",
+                            job_id=original_job_id,
+                        )
+                    ),
+                ),
+            )
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.wait_for_function(
+                "document.querySelector('#firstCutStatus')?.innerText === 'FAILED'"
+            )
+
+            requests = []
+            page.on("request", lambda request: requests.append(request))
+            page.fill("#screenplay", SCREENPLAY)
+            page.click("#direct")
+            page.wait_for_function(
+                "document.querySelector('#stage')?.dataset.state === 'completed'"
+            )
+            assert page.locator("#firstCutStatus").inner_text() == "NOT GENERATED"
+
+            page.click("#confirmMotion")
+            page.wait_for_function(
+                """() => document.querySelector('#videoAllowanceMessage')?.innerText
+                    .includes('Authorized replacement attempt available')"""
+            )
+            assert page.locator("#generateFirstCut").is_enabled()
+            assert page.evaluate(
+                "document.querySelector('#generateFirstCut').disabled === false"
+            )
+
+            approval_payloads = []
+
+            def block_approval(route):
+                approval_payloads.append(json.loads(route.request.post_data or "{}"))
+                route.abort()
+
+            page.route("**/api/video-jobs/approval", block_approval)
+            page.click("#generateFirstCut")
+            page.wait_for_function(
+                "document.querySelector('#videoApprovalDialog')?.open === true"
+            )
+            page.click("#confirmVideoApproval")
+            page.wait_for_timeout(100)
+            assert approval_payloads[0]["replacement_for_job_id"] == original_job_id
+            assert not any(
+                request.method == "POST"
+                and request.url.rstrip("/").endswith("/api/video-jobs")
+                for request in requests
+            )
+        finally:
+            browser.close()
+
+
+def test_replacement_approval_dialog_uses_replacement_copy_and_metadata_without_submission():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser video flow test.")
+
+    original_job_id = "job-original-failed-copy-123456"
+    configured_estimate = "Approximate veo-3.1-generate-001 estimate: ₹1,250.00"
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        try:
+            mock_video_api(
+                page,
+                provider="vertex",
+                remaining=0,
+                authorized_replacement_remaining=1,
+                authorized_replacement_for_job_id=original_job_id,
+                video_estimate=configured_estimate,
+                job_status="failed",
+            )
+            direction = direction_payload(provider="vertex")
+            direction["plan"]["motion_plan"]["confirmation_required"] = True
+            snapshot = {
+                "version": 1,
+                "scene": {"scene_key": "scene-test", "source_signature": "source-test"},
+                "screenplay": SCREENPLAY,
+                "creative_intent": "rising dread",
+                "direction_response": direction,
+                "video_job_ids": {"first_cut": original_job_id, "director_cut": None},
+            }
+            page.add_init_script(
+                f"""sessionStorage.setItem(
+                    'framepilot.video-recovery', {json.dumps(json.dumps(snapshot))}
+                )"""
+            )
+            page.route(
+                f"**/api/video-jobs/{original_job_id}",
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        video_job_payload(
+                            "failed",
+                            provider="vertex",
+                            job_id=original_job_id,
+                        )
+                    ),
+                ),
+            )
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.wait_for_function(
+                "document.querySelector('#firstCutStatus')?.innerText === 'FAILED'"
+            )
+            page.click("#confirmMotion")
+            page.wait_for_function(
+                "document.querySelector('#generateFirstCut')?.disabled === false"
+            )
+
+            approval_payloads = []
+
+            def block_approval(route):
+                approval_payloads.append(json.loads(route.request.post_data or "{}"))
+                route.abort()
+
+            page.route("**/api/video-jobs/approval", block_approval)
+            page.click("#generateFirstCut")
+            page.wait_for_function(
+                "document.querySelector('#videoApprovalDialog')?.open === true"
+            )
+            assert page.locator("#videoGenerationModel").inner_text() == "veo-3.1-generate-001"
+            assert page.locator("#videoGenerationEstimate").inner_text() == configured_estimate
+            assert page.locator("#videoGenerationEstimate").is_visible()
+            assert page.locator("#videoGenerationAllowance").inner_text() == (
+                "One authorized replacement Veo generation attempt will be used."
+            )
+            assert "remaining First Cut allowance" not in page.locator(
+                "#videoGenerationSpec"
+            ).inner_text()
+            assert approval_payloads == []
+
+            requests = []
+            page.on("request", lambda request: requests.append(request))
+            page.click("#confirmVideoApproval")
+            page.wait_for_timeout(100)
+            assert approval_payloads[0]["replacement_for_job_id"] == original_job_id
+            assert not any(
+                request.method == "POST"
+                and request.url.rstrip("/").endswith("/api/video-jobs")
+                for request in requests
+            )
+        finally:
+            browser.close()
+
+
+def test_vertex_first_cut_without_storyboard_handle_stays_disabled():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser video flow test.")
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        try:
+            mock_video_api(page, provider="vertex")
+            direction = direction_payload(provider="vertex")
+            direction["image_handle"] = None
+            page.route(
+                "**/api/direct",
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(direction),
+                ),
+            )
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.fill("#screenplay", SCREENPLAY)
+            page.click("#direct")
+            page.wait_for_function("document.querySelector('#stage')?.dataset.state === 'completed'")
+            assert page.locator("#generateFirstCut").is_disabled()
+            assert page.locator("#generateVeo").is_disabled()
+        finally:
+            browser.close()
+
+
+def test_vertex_generate_with_veo_uses_explicit_approval_and_no_cancel_submission():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser video flow test.")
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        try:
+            counts = mock_video_api(page, provider="vertex")
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.fill("#screenplay", SCREENPLAY)
+            page.click("#direct")
+            page.wait_for_function("document.querySelector('#stage')?.dataset.state === 'completed'")
+            page.click("#confirmMotion")
+
+            assert page.locator("#mode").inner_text().lower() == "vertex mode"
+            assert page.locator("#videoProviderLabel").inner_text().lower() == "vertex ai veo"
+            assert page.locator("#generateVeo").is_enabled()
+            assert page.locator("#generateFirstCut").is_enabled()
+
+            page.click("#generateVeo")
+            page.wait_for_function("document.querySelector('#videoApprovalDialog')?.open === true")
+            assert counts == {"approval": 0, "submission": 0}
+            assert page.locator("#videoApprovalTitle").inner_text() == "Generate First Cut"
+            assert "grounding_summary" in page.locator("#videoMotionPlan").inner_text()
+            assert "8-second, video-only output" in page.locator("#videoGenerationSpec").inner_text()
+            assert "veo-3.1-generate-001" in page.locator("#videoGenerationSpec").inner_text()
+            assert "deployment-configured" in page.locator("#videoGenerationSpec").inner_text()
+
+            page.click("#cancelVideoApproval")
+            assert counts == {"approval": 0, "submission": 0}
+            assert page.locator("#generateVeo").is_enabled()
+
+            page.click("#generateVeo")
+            page.wait_for_function("document.querySelector('#videoApprovalDialog')?.open === true")
+            page.evaluate(
+                """() => {
+                    const button = document.querySelector('#confirmVideoApproval');
+                    button.click();
+                    button.click();
+                }"""
+            )
+            page.wait_for_function("document.querySelector('#firstCutStatus')?.innerText === 'COMPLETED'")
+            assert counts == {"approval": 1, "submission": 1}
+            assert page.locator("#generateVeo").is_disabled()
+        finally:
+            browser.close()
+
+
+def test_mock_health_retains_demo_only_video_copy():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser video flow test.")
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        try:
+            mock_video_api(page, provider="mock")
+            page.goto(BASE_URL, wait_until="networkidle")
+            assert page.locator("#videoProviderLabel").inner_text().lower() == "demo generation only"
+            assert "bundled fixture" in page.locator("#videoIntro").inner_text()
+            assert page.locator("#firstCutProviderLabel").inner_text() == "Demo generation"
+        finally:
+            browser.close()
+
+
+def test_delayed_vertex_health_never_exposes_demo_provider_copy():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for browser health tests.")
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        try:
+            def delayed_health(route):
+                time.sleep(1.5)
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body='{"status":"ok","mode":"vertex","video_provider":"vertex"}',
+                )
+
+            page.route("**/api/health", delayed_health)
+            page.goto(BASE_URL, wait_until="commit")
+            page.wait_for_function(
+                """() => document.querySelector('#mode')?.innerText === 'Checking environment…'
+                    && document.querySelector('#videoProviderLabel')?.innerText
+                      ?.toLowerCase() === 'checking provider…'""",
+                timeout=1000,
+            )
+            page.wait_for_function(
+                "document.querySelector('#mode')?.innerText === 'Vertex mode'"
+            )
+            assert page.locator("#videoProviderLabel").inner_text().lower() == "vertex ai veo"
+        finally:
+            browser.close()
+
+
+def test_vertex_health_with_deterministic_fallback_is_labeled_without_provider_downgrade():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for browser direction tests.")
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        try:
+            mock_video_api(page, provider="vertex")
+            fallback = direction_payload(provider="vertex")
+            fallback["mode"] = "demo"
+            fallback["analysis_source"] = "deterministic_fallback"
+            fallback["activity"].insert(
+                0,
+                {
+                    "step": "FALLBACK",
+                    "detail": "Vertex response failed local validation; deterministic fallback used.",
+                },
+            )
+            page.route(
+                "**/api/direct",
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(fallback),
+                ),
+            )
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.click("#direct")
+            page.wait_for_function(
+                "document.querySelector('#stage')?.dataset.state === 'completed'"
+            )
+            assert page.locator("#mode").inner_text().lower() == "vertex mode"
+            assert page.locator("#videoProviderLabel").inner_text().lower() == "vertex ai veo"
+            assert page.locator("#analysisSource").inner_text() == "Deterministic fallback"
+            assert (
+                "Vertex response failed local validation"
+                in page.locator("#progressSummary").inner_text()
+            )
+        finally:
+            browser.close()
+
+
+def test_legacy_restored_direction_is_labeled_and_cannot_be_approved():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for browser recovery tests.")
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        try:
+            mock_video_api(page, provider="vertex")
+            legacy = direction_payload(provider="vertex")
+            legacy.pop("analysis_source")
+            snapshot = {
+                "version": 1,
+                "scene": {
+                    "scene_key": "scene-legacy",
+                    "source_signature": "source-legacy",
+                },
+                "screenplay": SCREENPLAY,
+                "creative_intent": "rising dread",
+                "direction_response": legacy,
+                "video_job_ids": {"first_cut": None, "director_cut": None},
+            }
+            page.add_init_script(
+                f"""sessionStorage.setItem(
+                    'framepilot.video-recovery', {json.dumps(json.dumps(snapshot))}
+                )"""
+            )
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.wait_for_function(
+                "document.querySelector('#stage')?.dataset.state === 'completed'"
+            )
+            assert page.locator("#analysisSource").inner_text() == "Legacy/fallback result"
+            assert page.locator("#generateVeo").is_disabled()
+            assert page.locator("#generateFirstCut").is_disabled()
+        finally:
+            browser.close()
+
+
+@pytest.mark.parametrize("job_status", ["queued", "generating", "submission_unknown", "completed", "failed"])
+def test_vertex_first_cut_terminal_and_active_states_block_resubmission(job_status):
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser video flow test.")
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        try:
+            mock_video_api(page, provider="vertex", job_status=job_status)
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.fill("#screenplay", SCREENPLAY)
+            page.click("#direct")
+            page.wait_for_function("document.querySelector('#stage')?.dataset.state === 'completed'")
+            page.click("#confirmMotion")
+            page.click("#generateVeo")
+            page.wait_for_function("document.querySelector('#videoApprovalDialog')?.open === true")
+            page.click("#confirmVideoApproval")
+            page.wait_for_function(
+                f"document.querySelector('#firstCutStatus')?.innerText === '{'STATUS UNCERTAIN' if job_status == 'submission_unknown' else job_status.upper()}'",
+            )
+            assert page.locator("#generateVeo").is_disabled()
+            assert page.locator("#generateFirstCut").is_disabled()
+        finally:
+            browser.close()
