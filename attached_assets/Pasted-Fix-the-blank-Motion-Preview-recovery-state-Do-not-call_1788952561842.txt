@@ -1,0 +1,52 @@
+Fix the blank Motion Preview recovery state. Do not call Direct, Gemini, Vertex AI, Veo, operations.get or Cloud Storage. Do not generate anything or change allowance records.
+
+Root condition:
+
+* The completed First Cut MP4 restores correctly.
+* The screenplay and intent restore correctly.
+* The original storyboard image bytes/URL do not restore after refresh.
+* Motion Preview therefore renders an empty black stage.
+
+Requirements:
+
+1. Inspect existing local/session/durable records for the exact storyboard asset associated with the completed observatory job and its source signature.
+
+2. If the exact original storyboard asset exists locally:
+
+* Restore it through the existing session-safe scene recovery path.
+* Render it immediately in Motion Preview.
+* Restore the existing local 2.5D motion plan if available.
+* Do not substitute a different image.
+* Do not reconstruct or generate an image.
+* Do not expose another client’s upload.
+
+3. If the exact storyboard asset does not exist:
+
+* Do not show a blank black stage.
+* Disable or hide the Motion Preview switch for that recovered legacy scene.
+* Show a compact message:
+  `Motion Preview is unavailable for this recovered scene. The completed generated video remains available.`
+* Default the workspace to `Generated Video`.
+* Keep Motion Preview fully available after a user uploads a new storyboard and runs Direct.
+
+4. Correct stage highlighting:
+
+* When `Motion Preview` is selected and available, Stage 2 must be active.
+* When `Generated Video` is selected, Stage 3 `First Cut` must be active.
+* Do not show Stage 1 as active while either output view is selected.
+* Completed earlier stages should remain marked complete.
+
+5. Do not allow a missing storyboard to erase or hide the completed First Cut.
+
+6. Add mocked browser tests for:
+
+* Restored storyboard produces a visible Motion Preview.
+* Missing storyboard never produces a blank black preview.
+* Missing storyboard defaults to Generated Video.
+* Motion Preview becomes available for a newly uploaded scene.
+* Stage highlighting follows the selected output.
+* No provider request occurs during recovery or switching.
+
+Run the full mock-only suite and show one screenshot of the Motion Preview state.
+
+Do not add new product functionality or redesign the interface.

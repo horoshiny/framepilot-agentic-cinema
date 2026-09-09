@@ -252,6 +252,19 @@ class VideoLedger:
             ).fetchone()
             return dict(row) if row else None
 
+    def job_for_client(self, job_id: str, client_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT *
+                FROM durable_video_jobs
+                WHERE job_id = ? AND client_id = ?
+                LIMIT 1
+                """,
+                (job_id, client_id),
+            ).fetchone()
+            return dict(row) if row else None
+
     def authorize_replacement(
         self,
         original_job_id: str,

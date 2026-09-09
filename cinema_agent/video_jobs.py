@@ -579,6 +579,17 @@ class MockVideoJobService:
                     self._video_bytes[job_id] = (video_file.read(), "video/mp4")
             return self._video_bytes[job_id]
 
+    def storyboard_bytes(self, job_id: str, client_id: str) -> tuple[bytes, str]:
+        with self._lock:
+            row = self.ledger.job_for_client(job_id, client_id)
+            if not row or row.get("status") != "completed":
+                raise JobNotFound("Storyboard image was not found for this client.")
+            image_bytes = row.get("storyboard_bytes")
+            mime_type = row.get("storyboard_mime_type")
+            if not image_bytes or not mime_type:
+                raise JobNotFound("Storyboard image was not stored for this client.")
+            return image_bytes, mime_type
+
     def get_critique_context(self, job_id: str, client_id: str) -> dict | None:
         with self._lock:
             self._owned_job(job_id, client_id)
@@ -726,6 +737,11 @@ class MockVideoJobService:
             "creative_intent": context.get("creative_intent"),
             "direction_response": context.get("direction_response"),
             "shot_plan": context.get("shot_plan"),
+            "storyboard_url": (
+                f"/api/video-jobs/{job.job_id}/storyboard"
+                if row.get("storyboard_bytes")
+                else None
+            ),
         }
 
     def _remember_job(self, job: VideoJob, row: dict | None = None) -> None:

@@ -98,3 +98,31 @@ mtime_ms = 1788898203938
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:466d516e-9b9e-4311-958e-e52c4ff41069/ad8e5fdc-c69d-4459-868f-9584dfa937ee/b946b073-804a-4992-8e7f-580d2805a630"
 storage_version_token = "1788898264961845"
 content_type = "image/png"
+
+[[outputs]]
+id = "DCXWOEFGgL0hej8y1DtOg"
+uri = "file://screenshots/motion-preview-recovered.png"
+type = "image"
+title = "Recovered Motion Preview"
+description = "Mocked session-owned recovery screenshot showing the exact restored storyboard rendered in Motion Preview with Stage 2 selected."
+logical_id = "d6a20f86-3894-4e7a-a9f4-7d394bce24ff"
+content_hash = "sha256:e9b3f6291650a4230a105144d1479cad755193607fda64eedf2b7baf4376a36b"
+size = 233322
+mtime_ms = 1788953507066
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:466d516e-9b9e-4311-958e-e52c4ff41069/d6a20f86-3894-4e7a-a9f4-7d394bce24ff/54146f80-79d6-484e-adb6-4d6699657bce"
+storage_version_token = "1788953538571128"
+content_type = "image/png"
+
+[[outputs]]
+id = "6g4sexrTnacrH5xzHw0qN"
+uri = "file://screenshots/actual-observatory-motion-preview.png"
+type = "image"
+title = "Actual Observatory Motion Preview"
+description = "Live running FramePilot app opened with the existing observatory session. The original storyboard is visibly rendered in Motion Preview with Stage 2 selected."
+logical_id = "a774d0cd-09f7-43e5-9e1a-72d199adb899"
+content_hash = "sha256:48ae587a5c56b9a10eac862bb61ee13a3b2f0eb78db719ddd5869d93da60e8f0"
+size = 812195
+mtime_ms = 1788954048675
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:466d516e-9b9e-4311-958e-e52c4ff41069/a774d0cd-09f7-43e5-9e1a-72d199adb899/26b123e9-9952-4dd8-933c-4f1701c959c2"
+storage_version_token = "1788954079279361"
+content_type = "image/png"

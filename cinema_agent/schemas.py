@@ -443,6 +443,7 @@ class VideoSceneSnapshot(BaseModel):
     creative_intent: str | None = None
     direction_response: dict[str, Any] | None = None
     shot_plan: dict[str, Any] | None = None
+    storyboard_url: str | None = None
 
 
 class VideoJob(BaseModel):

@@ -212,6 +212,18 @@ def mock_video_api(
                 body=json.dumps(latest_job),
             )
             return
+        if (
+            request.method == "GET"
+            and path.endswith("/storyboard")
+            and latest_job
+            and latest_job.get("scene_snapshot", {}).get("storyboard_url")
+        ):
+            route.fulfill(
+                status=200,
+                content_type="image/svg+xml",
+                body=FIXTURE.read_bytes(),
+            )
+            return
         if request.method == "POST" and path.endswith("/api/video-jobs"):
             counts["submission"] += 1
             body = json.loads(request.post_data or "{}")
@@ -383,6 +395,7 @@ def test_simplified_three_stage_workflow_switches_between_motion_and_first_cut()
             "screenplay": SCREENPLAY,
             "creative_intent": "rising dread",
             "direction_response": direction_payload(provider="vertex"),
+            "storyboard_url": "/api/video-jobs/video-three-stage/storyboard",
         },
     )
     with sync_playwright() as playwright:
@@ -403,19 +416,13 @@ def test_simplified_three_stage_workflow_switches_between_motion_and_first_cut()
             assert page.locator("#howWorks").count() == 0
             assert page.locator(".about-line").count() == 0
             assert page.locator("#mode").inner_text() == "Vertex AI connected"
-            assert page.locator("#generationDetailsPanel").is_visible()
-
             page.wait_for_function(
                 "document.querySelector('#firstCutStatus')?.innerText === 'COMPLETED'"
             )
-            assert page.locator("#firstCutOutput").get_attribute("aria-selected") == "true"
-            assert page.locator("#workflowFirstCut").get_attribute("data-state") == "active"
-            assert page.locator("#firstCutOutput").inner_text() == "Generated Video"
-            assert page.locator("#firstCutOutputPane").is_visible()
-            assert page.locator("#motionPreviewOutputPane").is_hidden()
-
-            page.click("#motionPreviewOutput")
             assert page.locator("#motionPreviewOutput").get_attribute("aria-selected") == "true"
+            assert page.locator("#workflowMotion").get_attribute("data-state") == "active"
+            assert page.locator("#workflowFirstCut").get_attribute("data-state") == ""
+            assert page.locator("#firstCutOutput").inner_text() == "Generated Video"
             assert page.locator("#motionPreviewOutput").get_attribute("aria-selected") == "true"
             assert page.locator("#motionPreviewOutputPane").is_visible()
             assert page.locator("#firstCutOutputPane").is_hidden()
@@ -428,8 +435,160 @@ def test_simplified_three_stage_workflow_switches_between_motion_and_first_cut()
 
             page.click("#firstCutOutput")
             assert page.locator("#firstCutOutput").get_attribute("aria-selected") == "true"
+            assert page.locator("#workflowFirstCut").get_attribute("data-state") == "active"
             assert page.locator("#firstCutVideo").is_visible()
+            assert page.locator("#generationDetailsPanel").is_visible()
             assert page.locator("#analyseFirstCut").inner_text() == "Review Generated Video"
+        finally:
+            browser.close()
+
+
+def test_completed_recovery_restores_storyboard_into_motion_preview_without_provider_calls():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser preview regression test.")
+
+    latest = video_job_payload(
+        provider="vertex",
+        job_id="video-restored-storyboard",
+        output_url="/api/video-jobs/video-restored-storyboard/video",
+        scene_snapshot={
+            "scene_key": "scene-observatory",
+            "source_signature": "source-observatory",
+            "screenplay": OBSERVATORY_SCREENPLAY,
+            "creative_intent": "quiet, majestic awe",
+            "direction_response": direction_payload(provider="vertex"),
+            "storyboard_url": "/api/video-jobs/video-restored-storyboard/storyboard",
+        },
+    )
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        requests = []
+        page.on("request", lambda request: requests.append((request.method, request.url)))
+        try:
+            mock_video_api(page, provider="vertex", latest_job=latest)
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.wait_for_function(
+                "document.querySelector('#firstCutStatus')?.innerText === 'COMPLETED'"
+            )
+            assert page.locator("#motionPreviewOutput").is_visible()
+            assert page.locator("#motionPreviewOutput").is_enabled()
+            assert page.locator("#motionPreviewOutput").get_attribute("aria-selected") == "true"
+            assert page.locator("#motionPreviewOutputPane").is_visible()
+            assert page.locator("#uploadedScene").is_visible()
+            assert page.locator("#stage").get_attribute("data-state") == "completed"
+            assert page.locator("#uploadState").inner_text() == "Storyboard image restored"
+            assert page.locator("#workflowMotion").get_attribute("data-state") == "active"
+            assert page.locator("#workflowDirect").get_attribute("data-state") == "complete"
+            assert page.locator("#workflowFirstCut").get_attribute("data-state") == ""
+
+            page.click("#firstCutOutput")
+            assert page.locator("#workflowFirstCut").get_attribute("data-state") == "active"
+            page.click("#motionPreviewOutput")
+            assert page.locator("#workflowMotion").get_attribute("data-state") == "active"
+            assert page.locator("#uploadedScene").is_visible()
+            assert not any(
+                method == "POST"
+                and any(path in url for path in ("/api/direct", "/api/video-jobs"))
+                for method, url in requests
+            )
+            assert not any(
+                "googleapis.com" in url or "vertex" in url.lower() or "gemini" in url.lower()
+                for _, url in requests
+            )
+        finally:
+            browser.close()
+
+
+def test_completed_recovery_without_storyboard_defaults_to_generated_video_without_blank_preview():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser preview regression test.")
+
+    latest = video_job_payload(
+        provider="vertex",
+        job_id="video-missing-storyboard",
+        output_url="/api/video-jobs/video-missing-storyboard/video",
+        scene_snapshot={
+            "scene_key": "scene-legacy",
+            "source_signature": "source-legacy",
+            "screenplay": OBSERVATORY_SCREENPLAY,
+            "creative_intent": "quiet, majestic awe",
+            "direction_response": direction_payload(provider="vertex"),
+        },
+    )
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        requests = []
+        page.on("request", lambda request: requests.append((request.method, request.url)))
+        try:
+            mock_video_api(page, provider="vertex", latest_job=latest)
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.wait_for_function(
+                "document.querySelector('#firstCutStatus')?.innerText === 'COMPLETED'"
+            )
+            assert page.locator("#firstCutOutput").is_visible()
+            assert page.locator("#firstCutOutput").get_attribute("aria-selected") == "true"
+            assert page.locator("#motionPreviewOutput").is_hidden()
+            assert page.locator("#motionPreviewOutput").is_disabled()
+            assert page.locator("#firstCutOutputPane").is_visible()
+            assert page.locator("#motionPreviewOutputPane").is_hidden()
+            assert page.locator("#uploadedScene").is_hidden()
+            assert page.locator("#videoRecoveryMessage").inner_text() == (
+                "Motion Preview is unavailable for this recovered scene. "
+                "The completed generated video remains available."
+            )
+            assert page.locator("#workflowFirstCut").get_attribute("data-state") == "active"
+            assert not any(
+                method == "POST"
+                and any(path in url for path in ("/api/direct", "/api/video-jobs"))
+                for method, url in requests
+            )
+        finally:
+            browser.close()
+
+
+def test_new_storyboard_upload_restores_motion_preview_after_missing_recovery():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser preview regression test.")
+
+    latest = video_job_payload(
+        provider="vertex",
+        job_id="video-missing-storyboard-upload",
+        output_url="/api/video-jobs/video-missing-storyboard-upload/video",
+        scene_snapshot={
+            "scene_key": "scene-legacy",
+            "source_signature": "source-legacy",
+            "screenplay": OBSERVATORY_SCREENPLAY,
+            "creative_intent": "quiet, majestic awe",
+            "direction_response": direction_payload(provider="vertex"),
+        },
+    )
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        try:
+            mock_video_api(page, provider="vertex", latest_job=latest)
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.wait_for_function(
+                "document.querySelector('#firstCutStatus')?.innerText === 'COMPLETED'"
+            )
+            page.set_input_files("#image", str(FIXTURE))
+            page.wait_for_function(
+                "document.querySelector('#uploadedScene')?.hidden === false"
+            )
+            page.click("#direct")
+            page.wait_for_function(
+                "document.querySelector('#stage')?.dataset.state === 'completed'"
+            )
+            assert page.locator("#motionPreviewOutput").is_visible()
+            assert page.locator("#motionPreviewOutput").is_enabled()
+            assert page.locator("#motionPreviewOutput").get_attribute("aria-selected") == "true"
+            assert page.locator("#uploadedScene").is_visible()
+            assert page.locator("#workflowMotion").get_attribute("data-state") == "active"
         finally:
             browser.close()
 

@@ -279,6 +279,18 @@ def get_video_output(job_id: str, http_request: Request):
         raise _video_error(error) from error
 
 
+@app.get("/api/video-jobs/{job_id}/storyboard")
+def get_storyboard_output(job_id: str, http_request: Request):
+    try:
+        content, media_type = video_job_service.storyboard_bytes(
+            job_id,
+            _session_id(http_request),
+        )
+        return Response(content=content, media_type=media_type)
+    except VideoJobError as error:
+        raise _video_error(error) from error
+
+
 @app.get("/api/video-jobs/latest", response_model=VideoJob | None)
 def get_latest_video_job(http_request: Request):
     try:

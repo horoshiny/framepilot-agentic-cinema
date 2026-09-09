@@ -20,3 +20,9 @@ The completed generated-video surface uses a compact header row for shot, state,
 **Why:** The video is the primary artifact, and the existing switch plus three-stage indicator already communicate the selected view without consuming vertical space.
 
 **How to apply:** Keep the header directly above the output switch and preserve the generated video as the strongest visual element.
+
+When a completed job includes its original storyboard bytes, expose them only through an owner-scoped read-only recovery URL and render those bytes in Motion Preview; if absent, hide Motion Preview and keep the completed video selected.
+
+**Why:** Process-local upload handles can disappear across refreshes, while substituting or reconstructing an image risks showing the wrong scene or another client’s upload.
+
+**How to apply:** Keep storyboard availability in the persisted scene snapshot without embedding bytes in JSON, and verify recovery with GET-only browser checks.

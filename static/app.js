@@ -35,6 +35,8 @@ let videoCritique = null;
 let videoCritiqueBusy = false;
 let durableFirstCutRestored = false;
 let recoveredScenePlanAvailable = true;
+let motionPreviewAvailable = true;
+let recoveredStoryboardObjectUrl = null;
 let outputMode = 'motion_preview';
 const VIDEO_RECOVERY_STORAGE_KEY = 'framepilot.video-recovery';
 const VIDEO_RECOVERY_VERSION = 1;
@@ -51,7 +53,8 @@ function isVertexVideoProvider() {
 
 function hasDirectionSource(result = data) {
   return result?.analysis_source === 'vertex_multimodal'
-    || result?.analysis_source === 'deterministic_fallback';
+    || result?.analysis_source === 'deterministic_fallback'
+    || result?.analysis_source === 'durable_recovery';
 }
 
 function isLegacyDirection(result = data) {
@@ -314,7 +317,12 @@ function renderOutputMode() {
   const motionPane = $('#motionPreviewOutputPane');
   const firstPane = $('#firstCutOutputPane');
   if (!motionButton || !firstButton || !motionPane || !firstPane) return;
+  if (!motionPreviewAvailable && outputMode === 'motion_preview') {
+    outputMode = firstReady ? 'first_cut' : 'motion_preview';
+  }
   if (!firstReady && outputMode === 'first_cut') outputMode = 'motion_preview';
+  motionButton.hidden = !motionPreviewAvailable;
+  motionButton.disabled = !motionPreviewAvailable;
   firstButton.hidden = !firstReady;
   firstButton.disabled = !firstReady;
   const firstSelected = firstReady && outputMode === 'first_cut';
@@ -337,6 +345,7 @@ function renderOutputMode() {
 }
 
 function selectOutput(mode) {
+  if (mode === 'motion_preview' && !motionPreviewAvailable) return;
   if (mode === 'first_cut' && videoStates.first_cut.status !== 'completed') return;
   outputMode = mode;
   renderOutputMode();
@@ -381,22 +390,25 @@ function renderGenerationDetails(state) {
   setTextIfPresent('#generationDetailDuration', `${duration} seconds`);
 }
 
-function renderRecoveredSceneView(sceneSnapshot) {
+async function renderRecoveredSceneView(sceneSnapshot) {
   const hasDirectionResponse = Boolean(
     sceneSnapshot?.direction_response?.plan
       && sceneSnapshot.direction_response.critique
       && sceneSnapshot.direction_response.routing,
   );
-  recoveredScenePlanAvailable = hasDirectionResponse;
+  const recoveredDirection = hasDirectionResponse
+    ? sceneSnapshot.direction_response
+    : recoveredDirectionResponse(sceneSnapshot);
+  recoveredScenePlanAvailable = Boolean(recoveredDirection);
   if (typeof sceneSnapshot?.screenplay === 'string') {
     $('#screenplay').value = sceneSnapshot.screenplay;
   }
   if (typeof sceneSnapshot?.creative_intent === 'string') {
     $('#mood').value = sceneSnapshot.creative_intent;
   }
-  if (hasDirectionResponse) {
+  if (recoveredDirection) {
     renderDirectedResult(
-      sceneSnapshot.direction_response,
+      recoveredDirection,
       {
         scene_key: sceneSnapshot.scene_key,
         source_signature: sceneSnapshot.source_signature,
@@ -413,6 +425,23 @@ function renderRecoveredSceneView(sceneSnapshot) {
     data = null;
     renderVideoProviderCopy();
   }
+  const restored = Boolean(recoveredDirection)
+    && await restoreStoryboardPreview(sceneSnapshot?.storyboard_url);
+  motionPreviewAvailable = restored;
+  if (restored) {
+    if (data) data.image_handle = null;
+    setRecoveryMessage('');
+  } else {
+    imageData = null;
+    hideStoryboardPreview();
+    if (data) data.image_handle = null;
+    setRecoveryMessage(
+      'Motion Preview is unavailable for this recovered scene. '
+      + 'The completed generated video remains available.',
+    );
+  }
+  renderOutputMode();
+  return restored;
 }
 
 function resetProgress() {
@@ -473,24 +502,36 @@ function renderResponseStatus(result) {
   const cached = result.activity.some(item => item.step === 'CACHE');
   const rateLimited = result.mode === 'rate_limited_fallback';
   const deterministicFallback = result.analysis_source === 'deterministic_fallback';
+  const durableRecovery = result.analysis_source === 'durable_recovery';
   const legacy = isLegacyDirection(result);
   const source = $('#analysisSource');
   if (source) {
     source.textContent = legacy
       ? 'Legacy/fallback result'
-      : result.analysis_source === 'deterministic_fallback'
+      : durableRecovery
+        ? 'Recovered scene plan'
+        : result.analysis_source === 'deterministic_fallback'
         ? 'Deterministic fallback'
         : 'Vertex multimodal';
-    source.dataset.state = legacy || result.analysis_source === 'deterministic_fallback'
+    source.dataset.state = durableRecovery
+      ? 'complete'
+      : legacy || result.analysis_source === 'deterministic_fallback'
       ? 'fallback'
       : 'complete';
     source.hidden = false;
   }
   setTextIfPresent(
     '#analysisSourcePlan',
-    result.analysis_source === 'deterministic_fallback' ? 'FALLBACK' : 'GROUNDED',
+    durableRecovery
+      ? 'RECOVERED'
+      : result.analysis_source === 'deterministic_fallback'
+        ? 'FALLBACK'
+        : 'GROUNDED',
   );
-  if (rateLimited || deterministicFallback || legacy) {
+  if (durableRecovery) {
+    setRequestState('complete', 'COMPLETE', 'MOTION PREVIEW RECOVERED');
+    setTextIfPresent('#progressSummary', 'Motion Preview restored from the completed scene');
+  } else if (rateLimited || deterministicFallback || legacy) {
     setRequestState('fallback', 'LOCAL FALLBACK', 'LOCAL FALLBACK READY');
     const fallbackDetail = result.activity.find(item => item.step === 'FALLBACK')?.detail;
     setTextIfPresent('#progressSummary', fallbackDetail || 'Local fallback ready');
@@ -498,6 +539,42 @@ function renderResponseStatus(result) {
     setRequestState('complete', 'COMPLETE', 'MOTION PREVIEW READY');
     setTextIfPresent('#progressSummary', 'Motion Preview ready · Director’s Cut ready after approval');
   }
+}
+
+function recoveredDirectionResponse(sceneSnapshot) {
+  const plan = sceneSnapshot?.shot_plan;
+  if (!plan?.shot || !plan.motion_plan) return null;
+  return {
+    mode: 'recovered',
+    analysis_source: 'durable_recovery',
+    image_handle: null,
+    depth_source: 'heuristic',
+    plan,
+    critique: {
+      diagnosis: 'Recovered from the completed scene record.',
+      revision_rationale: 'No revision plan was stored for this recovered scene.',
+      revision: {},
+      focus_score: null,
+      pacing_score: null,
+      cinematic_motion_score: null,
+      restraint_score: null,
+    },
+    routing: {
+      classification: 'LOCAL_2_5D',
+      rationale: 'Restored from the existing local 2.5D motion plan.',
+      matched_actions: [],
+      local_approximation_selected: true,
+    },
+    activity: [
+      { step: 'DIRECT', detail: 'Existing local motion plan restored.' },
+    ],
+    camera_grammar: 'balanced',
+    shot_signature: null,
+    diversity_adjustment: null,
+    revision_camera_grammar: null,
+    revision_shot_signature: null,
+    revision_diversity_adjustment: null,
+  };
 }
 
 const VIDEO_STATUS_LABELS = {
@@ -635,7 +712,7 @@ function renderVideoState(kind) {
   if (state.status === 'completed' && state.output?.url && video.src !== new URL(state.output.url, window.location.href).href) {
     video.src = `${state.output.url}?job=${encodeURIComponent(state.job_id)}`;
   }
-  if (state.status === 'completed') outputMode = 'first_cut';
+  if (state.status === 'completed' && !durableFirstCutRestored) outputMode = 'first_cut';
   const busy = ['queued', 'generating'].includes(state.status);
   const firstReady = videoStates.first_cut.status === 'completed';
   const directorReady = firstReady && revisionApproved;
@@ -802,6 +879,7 @@ function resetVideoStates() {
   videoCritique = null;
   videoCritiqueBusy = false;
   durableFirstCutRestored = false;
+  motionPreviewAvailable = true;
   outputMode = 'motion_preview';
   $('#approveRevision').disabled = true;
   $('#videoCritiqueStatus').hidden = true;
@@ -817,6 +895,45 @@ function setRecoveryMessage(message = '') {
   if (!node) return;
   node.hidden = !message;
   node.textContent = message;
+}
+
+function releaseRecoveredStoryboard() {
+  if (recoveredStoryboardObjectUrl) {
+    URL.revokeObjectURL(recoveredStoryboardObjectUrl);
+    recoveredStoryboardObjectUrl = null;
+  }
+}
+
+function hideStoryboardPreview() {
+  const uploadedScene = $('#uploadedScene');
+  if (uploadedScene) uploadedScene.hidden = true;
+  stage.classList.toggle('has-upload', false);
+}
+
+async function restoreStoryboardPreview(storyboardUrl) {
+  if (!storyboardUrl) return false;
+  try {
+    const response = await fetch(storyboardUrl);
+    if (!response.ok) return false;
+    const blob = await response.blob();
+    if (!blob.type.startsWith('image/')) return false;
+    releaseRecoveredStoryboard();
+    recoveredStoryboardObjectUrl = URL.createObjectURL(blob);
+    imageData = recoveredStoryboardObjectUrl;
+    const uploadedScene = $('#uploadedScene');
+    uploadedScene.querySelectorAll('.image-plane,.image-backing').forEach(plane => {
+      plane.style.backgroundImage = `url(${recoveredStoryboardObjectUrl})`;
+    });
+    uploadedScene.hidden = false;
+    stage.classList.add('has-upload');
+    $('#uploadState').textContent = 'Storyboard image restored';
+    stage.querySelectorAll(':scope > .layer,:scope > .moon,:scope > .fog,:scope > .shadow-wipe')
+      .forEach(element => { element.style.display = 'none'; });
+    applyDepthLayout(data?.plan?.depth_layout, data?.depth_source);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function clearRecoverySnapshot() {
@@ -941,6 +1058,8 @@ function videoContextPayload() {
 
 function renderDirectedResult(result, identity = null) {
   recoveredScenePlanAvailable = true;
+  motionPreviewAvailable = true;
+  setRecoveryMessage('');
   data = result;
   conservativePlanConfirmed = currentMotionPlan(result)?.confirmation_required === false;
   resetVideoStates();
@@ -1695,6 +1814,7 @@ $('#image').onchange = event => {
     event.target.value = '';
     return;
   }
+  releaseRecoveredStoryboard();
   imageData = null;
   resizeImage(file).then(resizedImage => {
     if (request !== uploadRequest) return;
@@ -1976,14 +2096,16 @@ async function restoreLatestCompletedFirstCut() {
 
     durableFirstCutRestored = true;
     const sceneSnapshot = result.scene_snapshot;
+    let restoredMotionPreview = false;
     if (sceneSnapshot?.direction_response) {
-      renderRecoveredSceneView(sceneSnapshot);
+      restoredMotionPreview = await renderRecoveredSceneView(sceneSnapshot);
     } else {
       resetVideoStates();
-      renderRecoveredSceneView(sceneSnapshot);
+      restoredMotionPreview = await renderRecoveredSceneView(sceneSnapshot);
     }
+    durableFirstCutRestored = true;
     videoStates.first_cut = result;
-    outputMode = 'first_cut';
+    outputMode = restoredMotionPreview ? 'motion_preview' : 'first_cut';
     videoSceneKey = result.scene_key || videoSceneKey;
     videoSourceSignature = result.source_signature || videoSourceSignature;
     revisionApproved = Boolean(result.revision_approved);
