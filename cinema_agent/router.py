@@ -95,9 +95,88 @@ _UNSUPPORTED_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
             r"\bexplosion\b",
             r"\bfly(?:s|ing)?\b",
             r"\blevitat(?:e|es|ed|ing)\b",
-            r"\b(?:fight|fights|fought|fighting|combat)\b",
         ),
     ),
+)
+
+_COMBAT_PATTERNS = (
+    r"\b(?:fight|fights|fought|fighting|combat|battle|battles|battled|battling)\b",
+    r"\b(?:duel|duels|duelled|dueling|grapple|grapples|grappled|grappling|"
+    r"wrestle|wrestles|wrestled|wrestling)\b",
+    r"\b(?:punch|punches|punched|punching|kick|kicks|kicked|kicking|"
+    r"strike|strikes|struck|striking)\b",
+    r"\b(?:attack|attacks|attacked|attacking|torture|tortures|tortured|torturing)\b",
+    r"\b(?:sexual assault|sexual violence|rape|rapes|raped|raping)\b",
+)
+_ADULT_PARTICIPANT_PATTERNS = (
+    r"\b(?:adult|adults|man|men|woman|women|detective|detectives|"
+    r"smuggler|smugglers|accomplice|accomplices|guard|guards|agent|agents|"
+    r"officer|officers|soldier|soldiers|boxer|boxers|fighter|fighters|"
+    r"attacker|attackers|assailant|assailants|bodyguard|bodyguards|"
+    r"thief|thieves|driver|drivers|stranger|strangers)\b",
+)
+_PARTICIPANT_PATTERNS = (
+    r"\b(?:adult|adults|man|men|woman|women|person|people|character|characters|"
+    r"detective|detectives|smuggler|smugglers|accomplice|accomplices|guard|guards|"
+    r"agent|agents|officer|officers|soldier|soldiers|boxer|boxers|fighter|fighters|"
+    r"attacker|attackers|assailant|assailants|bodyguard|bodyguards|thief|thieves|"
+    r"driver|drivers|stranger|strangers)\b",
+)
+_BLOCKED_COMBAT_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "graphic violence",
+        (
+            r"\b(?:blood|bloody|bleed|bleeding|gore|gory|dismember(?:s|ed|ing|ment)?|"
+            r"decapitat(?:e|es|ed|ing)|sever(?:s|ed|ing)?|entrails?|guts?|"
+            r"exposed bone|organ(?:s)?|disembowel(?:s|ed|ing)?)\b",
+        ),
+    ),
+    (
+        "severe visible injury",
+        (
+            r"\b(?:broken bone|fractur(?:e|es|ed|ing)|crush(?:es|ed|ing)?|"
+            r"maim(?:s|ed|ing)?|mutilat(?:e|es|ed|ing)|burn(?:s|ed|ing)?|"
+            r"behead(?:s|ed|ing)?|kill(?:s|ed|ing)?|murder(?:s|ed|ing)?|"
+            r"execute(?:s|d|ing)|fatal|dead|death|die|dies|dying|"
+            r"to the death|knocks?.{0,30}\bunconscious\b)\b",
+        ),
+    ),
+    (
+        "weapons",
+        (
+            r"\b(?:weapon|weapons|gun|guns|firearm|firearms|pistol|pistols|"
+            r"rifle|rifles|shotgun|shotguns|knife|knives|dagger|daggers|"
+            r"sword|swords|blade|blades|machete|machetes|axe|axes|"
+            r"point(?:s|ed|ing)?\s+a\s+gun)\b",
+        ),
+    ),
+    (
+        "sexual violence",
+        (
+            r"\b(?:sexual assault|sexual violence|rape|rapes|raped|raping|"
+            r"molest(?:s|ed|ing)?)\b",
+        ),
+    ),
+    (
+        "violence involving minors",
+        (
+            r"\b(?:child|children|kid|kids|minor|minors|teen|teenager|teenagers|"
+            r"baby|babies|infant|infants|toddler|toddlers)\b",
+        ),
+    ),
+    (
+        "torture or cruelty",
+        (
+            r"\b(?:torture|tortures|tortured|torturing|cruel(?:ty|ly)?|"
+            r"humiliate|humiliates|humiliated|humiliating|suffocate|"
+            r"suffocates|suffocated|suffocating)\b",
+        ),
+    ),
+)
+_SAFE_COMBAT_OUTCOMES = (
+    r"\b(?:block|blocks|blocked|blocking|dodge|dodges|dodged|dodging|"
+    r"pivot|pivots|pivoted|pivoting|fall|falls|fell|falling|"
+    r"controlled|choreograph(?:y|ed|ing)|defensive|spar|spars|sparred|sparring)\b",
 )
 
 _LOCAL_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -140,6 +219,91 @@ def _matched_labels(text: str, rules: tuple[tuple[str, tuple[str, ...]], ...]) -
     return [label for label, patterns in rules if _matches(text, patterns)]
 
 
+def _asserted_matches(text: str, patterns: tuple[str, ...]) -> bool:
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE | re.DOTALL):
+            sentence_start = max(
+                text.rfind(".", 0, match.start()),
+                text.rfind("!", 0, match.start()),
+                text.rfind("?", 0, match.start()),
+                text.rfind("\n", 0, match.start()),
+            )
+            prefix = text[sentence_start + 1 : match.start()]
+            if re.search(r"\b(?:no|without|never|not)\b[^.!?\n]{0,60}$", prefix, re.IGNORECASE):
+                continue
+            return True
+    return False
+
+
+def _matched_asserted_labels(
+    text: str,
+    rules: tuple[tuple[str, tuple[str, ...]], ...],
+) -> list[str]:
+    return [
+        label
+        for label, patterns in rules
+        if _asserted_matches(text, patterns)
+    ]
+
+
+def _combat_route(text: str) -> RoutingDecision | None:
+    if not _matches(text, _COMBAT_PATTERNS):
+        return None
+
+    blocked = _matched_asserted_labels(text, _BLOCKED_COMBAT_PATTERNS)
+    if blocked:
+        return RoutingDecision(
+            classification="UNSUPPORTED",
+            rationale=(
+                f"This request includes {', '.join(blocked)}. FramePilot keeps genuinely "
+                "unsafe or graphic violence blocked and does not override provider safety decisions. "
+                "No paid generation call was made."
+            ),
+            matched_actions=blocked,
+        )
+
+    participant_mentions = sum(
+        len(re.findall(pattern, text, flags=re.IGNORECASE | re.DOTALL))
+        for pattern in _PARTICIPANT_PATTERNS
+    )
+    adult_context = _matches(text, _ADULT_PARTICIPANT_PATTERNS)
+    multiple_participants = participant_mentions >= 2 or bool(
+        re.search(
+            r"\b(?:two|three|four|five|several|multiple|pair|group)\s+"
+            r"(?:adult|adults|people|persons|characters|men|women|fighters?)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+    if not adult_context or not multiple_participants:
+        return RoutingDecision(
+            classification="UNSUPPORTED",
+            rationale=(
+                "Combat language was identified, but the request does not establish a bounded "
+                "adult, multi-participant, non-graphic choreography context. It remains blocked "
+                "rather than being treated as local motion or automatically allowed."
+            ),
+            matched_actions=["ambiguous combat request"],
+        )
+
+    safe_outcome = _matches(text, _SAFE_COMBAT_OUTCOMES)
+    return RoutingDecision(
+        classification="GENERATIVE_VIDEO_REQUIRED",
+        rationale=(
+            "This is bounded, non-graphic adult combat choreography"
+            + (
+                " with explicit blocking, dodging, pivoting, falling, or defensive movement"
+                if safe_outcome
+                else ""
+            )
+            + ". Combat changes semantic subjects and must use an explicitly approved generative "
+            "video path; it is not available to the local 2.5D compositor. No paid generation API "
+            "was called."
+        ),
+        matched_actions=["non-graphic adult combat choreography"],
+    )
+
+
 def route_scene_action(screenplay: str, mood: str = "") -> RoutingDecision:
     """Route a scene request to the capabilities FramePilot can safely represent.
 
@@ -153,6 +317,9 @@ def route_scene_action(screenplay: str, mood: str = "") -> RoutingDecision:
     # adrenaline" describe tone, not a requested on-screen action.
     _ = mood
     text = screenplay.strip()
+    combat_route = _combat_route(text)
+    if combat_route is not None:
+        return combat_route
     generative_actions = _matched_labels(text, _GENERATIVE_PATTERNS)
     unsupported_actions = _matched_labels(text, _UNSUPPORTED_PATTERNS)
     local_actions = _matched_labels(text, _LOCAL_PATTERNS)

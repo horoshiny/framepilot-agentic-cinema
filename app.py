@@ -411,7 +411,12 @@ def _controlled_scene_eligibility(plan, screenplay, routing, analysis_source, im
         entity.entity_id or entity.label.strip().lower()
         for entity in characters
     }
-    fight_scene = bool(re.search(r"\b(fight|fighting|combat|battle)\b", evidence_text))
+    fight_scene = bool(
+        re.search(
+            r"\b(fight|fights|fought|fighting|combat|battle|duel|punch|kick|strike|grapple|wrestle)\b",
+            evidence_text,
+        )
+    )
     rain_depot_storyboard = (
         "rain" in evidence_text
         and bool(re.search(r"\b(train|depot|platform|railway|station)\b", evidence_text))

@@ -171,6 +171,26 @@ def test_unsupported_action_is_rejected_instead_of_invented():
     assert not plan.motion_plan.movable_objects
 
 
+def test_local_motion_preview_does_not_pretend_to_perform_combat():
+    plan = demo_plan(
+        "Two adults fight on a platform: they dodge, pivot and trade controlled punches.",
+        "urgent but controlled",
+    )
+
+    assert plan.motion_plan.unsupported_actions == []
+    assert not any(
+        "fight" in candidate.action.lower()
+        or "punch" in candidate.action.lower()
+        or "combat" in candidate.action.lower()
+        for candidate in [
+            *plan.motion_plan.movable_characters,
+            *plan.motion_plan.movable_objects,
+            *plan.motion_plan.environmental_motion,
+        ]
+    )
+    assert any("generative video" in item.lower() for item in plan.motion_plan.prohibited_changes)
+
+
 def test_unrelated_scene_is_parsed_without_scene_specific_rules():
     screenplay = (
         "A violinist lifts a bow. The bow rotates slowly. Snow drifts across the courtyard. "

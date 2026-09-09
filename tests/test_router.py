@@ -132,6 +132,45 @@ def test_unreliable_actions_are_unsupported():
     assert "unsupported physical spectacle" in decision.matched_actions
 
 
+def test_non_graphic_adult_combat_requires_generative_video():
+    decision = route_scene_action(
+        "Two adults fight on the rain-soaked platform: they dodge, pivot, trade controlled "
+        "punches and fall safely. No blood, gore, weapons or severe injury."
+    )
+
+    assert decision.classification == "GENERATIVE_VIDEO_REQUIRED"
+    assert "non-graphic adult combat choreography" in decision.matched_actions
+    assert "local 2.5D compositor" in decision.rationale
+
+
+def test_combat_classifier_requires_bounded_context_instead_of_allowing_keywords():
+    assert route_scene_action("A person fights.").classification == "UNSUPPORTED"
+    assert route_scene_action("A detective kicks a door.").classification == "UNSUPPORTED"
+    assert (
+        route_scene_action("A detective fights a smuggler with a knife.")
+        .classification
+        == "UNSUPPORTED"
+    )
+
+
+@pytest.mark.parametrize(
+    "screenplay",
+    [
+        "Two adults fight with blood and gore visible.",
+        "A detective fights a smuggler and an accomplice with a pistol.",
+        "Two adults fight until one is killed.",
+        "An adult tortures a captive.",
+        "A child is attacked by an adult.",
+        "A woman is subjected to sexual violence.",
+    ],
+)
+def test_genuinely_unsafe_combat_categories_remain_blocked(screenplay):
+    decision = route_scene_action(screenplay)
+
+    assert decision.classification == "UNSUPPORTED"
+    assert decision.matched_actions
+
+
 def test_direct_endpoint_exposes_routing_decision(monkeypatch):
     monkeypatch.setenv("DEMO_MODE", "true")
     monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
@@ -154,6 +193,69 @@ def test_direct_endpoint_exposes_routing_decision(monkeypatch):
     assert motion_plan["camera_movement"]["screenplay_evidence"]
     assert motion_plan["preserved_elements"]
     assert motion_plan["prohibited_changes"]
+
+
+def test_vertex_multimodal_detective_scene_is_eligible_without_provider_calls(monkeypatch):
+    import cinema_agent.vertex as vertex
+    from cinema_agent.schemas import SceneEntity
+
+    screenplay = (
+        "A detective fights a smuggler and an accomplice on the rain-soaked depot platform. "
+        "They dodge, pivot and trade controlled punches. No blood, gore, weapons or severe injury."
+    )
+    image = "data:image/png;base64,ZmFrZS1zdG9yeWJvYXJk"
+    base_plan = demo_plan(screenplay, "urgent but controlled", image)
+    visible_characters = [
+        SceneEntity(
+            entity_id=label,
+            label=label,
+            entity_type="character",
+            visual_evidence=f"The storyboard visibly shows the {label}.",
+            screenplay_evidence=screenplay,
+            grounding_source="visual_and_screenplay",
+            confidence=0.95,
+            visual_confidence=0.95,
+            support="supported",
+        )
+        for label in ("detective", "smuggler", "accomplice")
+    ]
+    base_plan = base_plan.model_copy(
+        update={
+            "motion_plan": base_plan.motion_plan.model_copy(
+                update={"visible_characters": visible_characters}
+            )
+        }
+    )
+    calls = []
+
+    def fake_plan(*args):
+        calls.append("plan")
+        return base_plan
+
+    def fake_critique(*args):
+        calls.append("critique")
+        return demo_critique(base_plan)
+
+    monkeypatch.setattr(app_module, "runtime_mode", lambda: "vertex")
+    monkeypatch.setattr(app_module, "vertex_request_limiter", VertexRateLimiter())
+    monkeypatch.setattr(vertex, "generate_shot_plan", fake_plan)
+    monkeypatch.setattr(vertex, "generate_critique", fake_critique)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/direct",
+        json={"screenplay": screenplay, "mood": "urgent but controlled", "image_data_url": image},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["analysis_source"] == "vertex_multimodal"
+    assert payload["routing"]["classification"] == "GENERATIVE_VIDEO_REQUIRED"
+    assert calls == ["plan", "critique"]
+    session_id = client.cookies.get(app_module.SESSION_COOKIE_NAME)
+    context = app_module.video_job_service.direct_context(session_id)
+    assert context["eligibility"]["controlled_test_eligible"] is True
+    assert context["eligibility"]["generative_video_required"] is True
 
 
 def test_direct_endpoint_exposes_camera_grammar_and_signatures(monkeypatch):
