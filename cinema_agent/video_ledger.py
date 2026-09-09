@@ -603,16 +603,28 @@ class VideoLedger:
         model: str,
         created_at: float,
     ) -> ControlledAuthorization:
+        return self.seed_pending_controlled_test_authorization(
+            authorization_id=authorization_id,
+            model=model,
+            created_at=created_at,
+        )
+
+    def seed_pending_controlled_test_authorization(
+        self,
+        *,
+        authorization_id: str,
+        model: str,
+        created_at: float,
+    ) -> ControlledAuthorization:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
                 """
                 SELECT * FROM video_test_authorizations
-                WHERE authorization_source = 'authorized_test_attempt'
-                  AND state = 'pending'
-                ORDER BY created_at ASC
-                LIMIT 1
+                WHERE authorization_id = ?
                 """
+                ,
+                (authorization_id,),
             ).fetchone()
             if existing:
                 connection.execute("COMMIT")
@@ -887,17 +899,22 @@ class VideoLedger:
             return None
         return self._controlled_authorization_from_row(row)
 
-    def pending_controlled_test_authorization(self) -> ControlledAuthorization | None:
+    def pending_controlled_test_authorization(
+        self,
+        authorization_id: str | None = None,
+    ) -> ControlledAuthorization | None:
+        query = """
+            SELECT * FROM video_test_authorizations
+            WHERE authorization_source = 'authorized_test_attempt'
+              AND state = 'pending'
+        """
+        params: tuple[str, ...] = ()
+        if authorization_id:
+            query += " AND authorization_id = ?"
+            params = (authorization_id,)
+        query += " ORDER BY created_at ASC LIMIT 1"
         with self._connect() as connection:
-            row = connection.execute(
-                """
-                SELECT * FROM video_test_authorizations
-                WHERE authorization_source = 'authorized_test_attempt'
-                  AND state = 'pending'
-                ORDER BY created_at ASC
-                LIMIT 1
-                """
-            ).fetchone()
+            row = connection.execute(query, params).fetchone()
         return self._controlled_authorization_from_row(row) if row else None
 
     def reserve_controlled_test_authorization(

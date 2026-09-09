@@ -49,6 +49,19 @@ SESSION_COOKIE_NAME = "framepilot_session"
 SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 30
 logger = logging.getLogger(__name__)
 
+PENDING_CONTROLLED_AUTHORIZATION_ID = "pending-auth-final-fight-demo"
+PENDING_CONTROLLED_AUTHORIZATION_MODEL = "veo-3.1-generate-001"
+
+
+@app.on_event("startup")
+def seed_controlled_test_authorization():
+    if video_job_service.provider_name != "vertex":
+        return
+    video_job_service.ensure_pending_controlled_test_authorization(
+        authorization_id=PENDING_CONTROLLED_AUTHORIZATION_ID,
+        model=PENDING_CONTROLLED_AUTHORIZATION_MODEL,
+    )
+
 _SAFE_VERTEX_FIELD = re.compile(r"^[A-Za-z0-9_.:/-]{1,96}$")
 _VERTEX_DATA_URL = re.compile(r"data:[^;\s]+;base64,[A-Za-z0-9+/=_-]+", re.IGNORECASE)
 _VERTEX_BEARER = re.compile(r"\bBearer\s+\S+", re.IGNORECASE)
@@ -253,8 +266,8 @@ def activate_video_test_authorization(
 def create_pending_video_test_authorization():
     try:
         return video_job_service.create_pending_controlled_test_authorization(
-            authorization_id="pending-auth-final-fight-demo",
-            model="veo-3.1-generate-001",
+            authorization_id=PENDING_CONTROLLED_AUTHORIZATION_ID,
+            model=PENDING_CONTROLLED_AUTHORIZATION_MODEL,
         )
     except VideoJobError as error:
         raise _video_error(error) from error
@@ -283,7 +296,9 @@ def video_test_authorization(
     response_model=ControlledAuthorizationStatus,
 )
 def pending_video_test_authorization():
-    return video_job_service.pending_controlled_test_authorization_status()
+    return video_job_service.pending_controlled_test_authorization_status(
+        authorization_id=PENDING_CONTROLLED_AUTHORIZATION_ID,
+    )
 
 
 @app.get("/api/storyboard-images/{image_handle}")

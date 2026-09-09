@@ -128,7 +128,7 @@ def test_pending_authorization_is_unbound_and_direct_context_survives_restart(
     monkeypatch.setenv("ALLOW_VEO_GENERATION", "true")
     ledger_path = str(tmp_path / "durable-direct.sqlite3")
     first = MockVideoJobService(provider=FakeVertexProvider(), ledger_path=ledger_path)
-    pending = first.create_pending_controlled_test_authorization(
+    pending = first.ensure_pending_controlled_test_authorization(
         authorization_id="pending-auth-final-fight-demo",
         model="veo-3.1-generate-001",
     )
@@ -160,7 +160,57 @@ def test_pending_authorization_is_unbound_and_direct_context_survives_restart(
     restored_bytes, restored_type = second.storyboard_image(image_handle, "session-a")
     assert restored_bytes.startswith(b"fake-storyboard")
     assert restored_type == "image/png"
-    assert second.ledger.pending_controlled_test_authorization().client_id is None
+    assert (
+        second.ledger.pending_controlled_test_authorization(
+            "pending-auth-final-fight-demo"
+        ).client_id
+        is None
+    )
+
+
+def test_pending_seed_is_idempotent_and_never_renews_a_used_authorization(tmp_path):
+    ledger = VideoLedger(str(tmp_path / "pending-seed.sqlite3"))
+    first = ledger.seed_pending_controlled_test_authorization(
+        authorization_id="pending-auth-final-fight-demo",
+        model="veo-3.1-generate-001",
+        created_at=1.0,
+    )
+    second = ledger.seed_pending_controlled_test_authorization(
+        authorization_id="pending-auth-final-fight-demo",
+        model="veo-3.1-generate-001",
+        created_at=2.0,
+    )
+    assert first.authorization_id == second.authorization_id
+    assert second.state == "pending"
+    assert second.client_id is None
+
+    available = ledger.activate_controlled_test_authorization(
+        client_id="session-a",
+        scene_key="scene-final-fight",
+        source_signature="source-final-fight",
+        model="veo-3.1-generate-001",
+        authorization_id="ignored-legacy-id",
+        activated_at=3.0,
+    )
+    assert available.state == "available"
+    assert available.authorization_id == "pending-auth-final-fight-demo"
+    assert ledger.reserve_controlled_test_authorization(
+        available.authorization_id,
+        client_id="session-a",
+        scene_key="scene-final-fight",
+        source_signature="source-final-fight",
+        model="veo-3.1-generate-001",
+        job_id="job-final-fight",
+        reserved_at=4.0,
+    )
+    ledger.consume_controlled_test_authorization("job-final-fight", 5.0)
+    used = ledger.seed_pending_controlled_test_authorization(
+        authorization_id="pending-auth-final-fight-demo",
+        model="veo-3.1-generate-001",
+        created_at=6.0,
+    )
+    assert used.state == "consumed"
+    assert used.client_id == "session-a"
 
 
 class FakeVertexProvider:

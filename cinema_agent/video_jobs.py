@@ -301,9 +301,20 @@ class MockVideoJobService:
         authorization_id: str,
         model: str,
     ) -> ControlledAuthorizationStatus:
+        return self.ensure_pending_controlled_test_authorization(
+            authorization_id=authorization_id,
+            model=model,
+        )
+
+    def ensure_pending_controlled_test_authorization(
+        self,
+        *,
+        authorization_id: str,
+        model: str,
+    ) -> ControlledAuthorizationStatus:
         try:
             model = validate_veo_model(model)
-            authorization = self.ledger.create_pending_controlled_test_authorization(
+            authorization = self.ledger.seed_pending_controlled_test_authorization(
                 authorization_id=authorization_id,
                 model=model,
                 created_at=self._now(),
@@ -426,8 +437,12 @@ class MockVideoJobService:
         )
         return self._controlled_status(authorization)
 
-    def pending_controlled_test_authorization_status(self) -> ControlledAuthorizationStatus:
-        authorization = self.ledger.pending_controlled_test_authorization()
+    def pending_controlled_test_authorization_status(
+        self,
+        *,
+        authorization_id: str,
+    ) -> ControlledAuthorizationStatus:
+        authorization = self.ledger.pending_controlled_test_authorization(authorization_id)
         return self._controlled_status(authorization)
 
     @staticmethod
