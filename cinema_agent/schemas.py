@@ -345,6 +345,8 @@ class DirectResponse(BaseModel):
     analysis_source: Literal["vertex_multimodal", "deterministic_fallback"] = (
         "deterministic_fallback"
     )
+    scene_key: str | None = None
+    source_signature: str | None = None
     image_handle: str | None = None
     depth_source: Literal["image_aware", "heuristic"] = "heuristic"
     plan: ShotPlan
@@ -382,6 +384,12 @@ class VideoApprovalRequest(BaseModel):
     replacement_for_job_id: str | None = None
     image_handle: str | None = None
     video_critique: VideoCritique | None = None
+    analysis_source: Literal[
+        "vertex_multimodal",
+        "deterministic_fallback",
+        "durable_recovery",
+    ] | None = None
+    direction_response: dict[str, Any] | None = None
     controlled_authorization_id: str | None = Field(default=None, min_length=8, max_length=128)
 
 
@@ -454,6 +462,7 @@ class ControlledAuthorizationRequest(BaseModel):
     model: str = Field(min_length=1, max_length=200)
     kind: Literal["first_cut"] = "first_cut"
     image_handle: str | None = None
+    analysis_source: Literal["vertex_multimodal", "deterministic_fallback"]
 
 
 class ControlledAuthorizationStatus(BaseModel):
@@ -478,6 +487,12 @@ class VideoSceneSnapshot(BaseModel):
     direction_response: dict[str, Any] | None = None
     shot_plan: dict[str, Any] | None = None
     storyboard_url: str | None = None
+    analysis_source: Literal[
+        "vertex_multimodal",
+        "deterministic_fallback",
+        "durable_recovery",
+    ] | None = None
+    storyboard_image_handle: str | None = None
 
 
 class VideoJob(BaseModel):

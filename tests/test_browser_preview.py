@@ -23,6 +23,9 @@ OBSERVATORY_SCREENPLAY = """EXT. FLOODED CELESTIAL OBSERVATORY — BLUE HOUR
 A cloaked astronomer stands on a circular stone platform above still floodwater. A massive brass astrolabe frames the foreground. Beyond the ruined towers, a luminous celestial portal hangs in the sky.
 
 The astronomer slowly raises an amber lantern from waist to shoulder height, keeping both feet planted. A breeze lifts the cloak’s hem. Mist drifts between the ruins. The portal’s concentric rings turn slowly, releasing one gentle pulse of light. Small ripples carry its reflection across the water. The astronomer holds the lantern steady as the light fades."""
+CASTORS_SCREENPLAY = """EXT. FAMILY GARDEN — GOLDEN-HOUR EVENING
+
+Four brothers gather around a paper crown beneath a flowering tree. Castor lifts the crown as the others lean closer, laughing while warm light moves through the leaves."""
 
 
 def direction_payload(*, provider="vertex"):
@@ -53,6 +56,30 @@ def direction_payload(*, provider="vertex"):
         "revision_shot_signature": None,
         "revision_diversity_adjustment": None,
     }
+
+
+def floating_market_direction_payload():
+    direction = direction_payload(provider="vertex")
+    direction["scene_key"] = "scene-floating-ocean-market"
+    direction["source_signature"] = "source-floating-ocean-market"
+    direction["image_handle"] = "image-floating-market"
+    direction["plan"]["scene_summary"] = (
+        "A floating ocean market drifts between bright boats and quiet waves."
+    )
+    direction["plan"]["motion_plan"]["confirmation_required"] = False
+    direction["plan"]["motion_plan"]["visible_characters"] = [
+        {"label": "market vendor"},
+        {"label": "blue robot"},
+        {"label": "courier"},
+    ]
+    direction["plan"]["motion_plan"]["visible_objects"] = [
+        {"label": "blue robot"},
+        {"label": "fruit"},
+        {"label": "crates"},
+        {"label": "tools"},
+        {"label": "courier bag"},
+    ]
+    return direction
 
 
 def allowance_payload(
@@ -93,12 +120,17 @@ def video_job_payload(
     scene_snapshot=None,
 ):
     completed = status == "completed"
+    snapshot_scene_key = (scene_snapshot or {}).get("scene_key", "scene-test")
+    snapshot_source_signature = (scene_snapshot or {}).get(
+        "source_signature",
+        "source-test",
+    )
     return {
         "job_id": job_id,
         "kind": kind,
         "status": status,
-        "scene_key": "scene-test",
-        "source_signature": "source-test",
+        "scene_key": snapshot_scene_key,
+        "source_signature": snapshot_source_signature,
         "provider": provider,
         "created_at": 1,
         "updated_at": 1,
@@ -140,6 +172,7 @@ def mock_video_api(
     job_status="completed",
     video_estimate="Approximate veo-3.1-generate-001 estimate: deployment-configured",
     latest_job=None,
+    job_payloads=None,
 ):
     counts = {"approval": 0, "submission": 0}
     direction = direction_payload(provider=provider)
@@ -258,7 +291,20 @@ def mock_video_api(
                 ),
             )
             return
-        if request.method == "GET" and "/api/video-jobs/job-" in path:
+        job_path = path.split("/api/video-jobs/", 1)[-1]
+        if (
+            request.method == "GET"
+            and "/api/video-jobs/" in path
+            and "/" not in job_path
+        ):
+            job_id = path.rsplit("/", 1)[-1]
+            if job_payloads and job_id in job_payloads:
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(job_payloads[job_id]),
+                )
+                return
             kind = "director_cut" if "director_cut" in path else "first_cut"
             route.fulfill(
                 status=200,
@@ -373,6 +419,62 @@ def test_completed_durable_first_cut_wins_over_deterministic_fallback_snapshot()
             assert page.locator("#generationDetailsPanel").inner_text().find("Generation Details") >= 0
             assert page.locator("#scenePlanContent").is_hidden()
             assert page.locator("#firstCutVideo").is_visible()
+            assert not any(
+                method == "POST"
+                and any(path in url for path in ("/api/direct", "/api/video-jobs"))
+                for method, url in requests
+            )
+        finally:
+            browser.close()
+
+
+def test_completed_floating_market_first_cut_restores_and_plays_after_refresh():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser preview regression test.")
+
+    direction = floating_market_direction_payload()
+    latest = video_job_payload(
+        provider="vertex",
+        job_id="video-floating-market",
+        scene_snapshot={
+            "scene_key": direction["scene_key"],
+            "source_signature": direction["source_signature"],
+            "screenplay": (
+                "A floating ocean market carries a blue robot, fruit, crates, tools, "
+                "and a courier bag."
+            ),
+            "creative_intent": "buoyant anticipation",
+            "analysis_source": "vertex_multimodal",
+            "direction_response": direction,
+            "storyboard_url": "/api/video-jobs/video-floating-market/storyboard",
+        },
+    )
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        requests = []
+        page.on("request", lambda request: requests.append((request.method, request.url)))
+        try:
+            mock_video_api(page, provider="vertex", remaining=0, latest_job=latest)
+            page.goto(BASE_URL, wait_until="networkidle")
+            for _ in range(2):
+                page.wait_for_function(
+                    "document.querySelector('#firstCutStatus')?.innerText === 'COMPLETED'"
+                )
+                page.click("#firstCutOutput")
+                page.wait_for_function(
+                    "document.querySelector('#firstCutVideo')?.readyState >= 1"
+                )
+                assert page.locator("#firstCutVideo").is_visible()
+                assert page.locator("#firstCutVideo").get_attribute("src").startswith(
+                    "/static/demo-generation.mp4"
+                )
+                assert page.locator("#screenplay").input_value().startswith(
+                    "A floating ocean market carries"
+                )
+                if not page.locator("#firstCutOutput").get_attribute("aria-selected") == "true":
+                    page.reload(wait_until="networkidle")
             assert not any(
                 method == "POST"
                 and any(path in url for path in ("/api/direct", "/api/video-jobs"))
@@ -497,6 +599,119 @@ def test_completed_recovery_restores_storyboard_into_motion_preview_without_prov
             )
             assert not any(
                 "googleapis.com" in url or "vertex" in url.lower() or "gemini" in url.lower()
+                for _, url in requests
+            )
+        finally:
+            browser.close()
+
+
+def test_castors_day_recovery_keeps_vertex_scene_and_does_not_cross_contaminate_observatory():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser preview regression test.")
+
+    castors_scene = {
+        "scene_key": "scene-castors-day",
+        "source_signature": "source-castors-day",
+        "screenplay": CASTORS_SCREENPLAY,
+        "creative_intent": "warm family celebration in golden-hour light",
+        "analysis_source": "vertex_multimodal",
+        "shot_plan": direction_payload(provider="vertex")["plan"],
+        "storyboard_url": "/api/video-jobs/video-castors-day/storyboard",
+    }
+    castors_job = video_job_payload(
+        provider="vertex",
+        job_id="video-castors-day",
+        output_url="/api/video-jobs/video-castors-day/video",
+        scene_snapshot=castors_scene,
+    )
+    observatory_job = video_job_payload(
+        provider="vertex",
+        job_id="video-observatory",
+        output_url="/api/video-jobs/video-observatory/video",
+        scene_snapshot={
+            "scene_key": "scene-observatory",
+            "source_signature": "source-observatory",
+            "screenplay": OBSERVATORY_SCREENPLAY,
+            "creative_intent": "quiet, majestic awe",
+            "direction_response": direction_payload(provider="vertex"),
+        },
+    )
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(
+            headless=True,
+            executable_path=chromium,
+        )
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        requests = []
+        page.on("request", lambda request: requests.append((request.method, request.url)))
+        try:
+            mock_video_api(
+                page,
+                provider="vertex",
+                remaining=0,
+                latest_job=castors_job,
+                job_payloads={
+                    "video-castors-day": castors_job,
+                    "video-observatory": observatory_job,
+                },
+            )
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.wait_for_function(
+                "document.querySelector('#firstCutStatus')?.innerText === 'COMPLETED'"
+            )
+            assert page.locator("#screenplay").input_value() == CASTORS_SCREENPLAY
+            assert page.locator("#analysisSource").inner_text() == "Vertex multimodal"
+            assert page.locator("#uploadedScene").is_visible()
+            assert page.locator("#uploadState").inner_text() == "Storyboard image restored"
+            assert page.locator("#firstCutVideo").get_attribute("src").startswith(
+                "/api/video-jobs/video-castors-day/video"
+            )
+            assert page.locator("#generationDetailModel").inner_text() == (
+                "veo-3.1-generate-001"
+            )
+            assert page.locator("#workflowMotion").get_attribute("data-state") == "active"
+
+            page.evaluate(
+                """value => sessionStorage.setItem(
+                    'framepilot.video-recovery',
+                    JSON.stringify(value)
+                )""",
+                {
+                    "version": 1,
+                    "scene": {
+                        "scene_key": "scene-observatory",
+                        "source_signature": "source-observatory",
+                    },
+                    "screenplay": OBSERVATORY_SCREENPLAY,
+                    "creative_intent": "quiet, majestic awe",
+                    "direction_response": direction_payload(provider="vertex"),
+                    "video_job_ids": {
+                        "first_cut": "video-observatory",
+                        "director_cut": None,
+                    },
+                },
+            )
+            page.reload(wait_until="networkidle")
+            page.wait_for_function(
+                "document.querySelector('#firstCutStatus')?.innerText === 'COMPLETED'"
+            )
+            assert page.locator("#screenplay").input_value() == OBSERVATORY_SCREENPLAY
+            assert page.locator("#firstCutVideo").get_attribute("src").startswith(
+                "/api/video-jobs/video-observatory/video"
+            )
+            assert page.locator("#firstCutVideo").get_attribute("src").find(
+                "video-castors-day"
+            ) == -1
+            assert not any(
+                method == "POST"
+                and any(path in url for path in ("/api/direct", "/api/video-jobs"))
+                for method, url in requests
+            )
+            assert not any(
+                "googleapis.com" in url
+                or "vertex" in url.lower()
+                or "gemini" in url.lower()
                 for _, url in requests
             )
         finally:
@@ -918,7 +1133,7 @@ def test_exhausted_real_allowance_disables_first_cut_with_exact_message():
             page.wait_for_function(
                 "document.querySelector('#videoAllowanceMessage')?.hidden === false"
             )
-            assert page.locator("#generateFirstCut").is_disabled()
+            assert page.locator("#generateFirstCut").is_hidden()
             assert page.locator("#videoAllowanceMessage").inner_text() == (
                 "Normal First Cut allowance: 1 used / 0 remaining. "
                 "Authorized replacement: 0 remaining."
@@ -1205,8 +1420,8 @@ def test_vertex_first_cut_without_storyboard_handle_stays_disabled():
             page.fill("#screenplay", SCREENPLAY)
             page.click("#direct")
             page.wait_for_function("document.querySelector('#stage')?.dataset.state === 'completed'")
-            assert page.locator("#generateFirstCut").is_disabled()
-            assert page.locator("#generateVeo").is_disabled()
+            assert page.locator("#generateFirstCut").is_hidden()
+            assert page.locator("#generateVeo").is_hidden()
         finally:
             browser.close()
 
@@ -1256,7 +1471,97 @@ def test_vertex_generate_with_veo_uses_explicit_approval_and_no_cancel_submissio
             )
             page.wait_for_function("document.querySelector('#firstCutStatus')?.innerText === 'COMPLETED'")
             assert counts == {"approval": 1, "submission": 1}
-            assert page.locator("#generateVeo").is_disabled()
+            assert page.locator("#generateVeo").is_hidden()
+        finally:
+            browser.close()
+
+
+def test_floating_market_activation_reenables_first_cut_without_direct_or_provider_calls():
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser video flow test.")
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, executable_path=chromium)
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        try:
+            counts = mock_video_api(page, provider="vertex", remaining=0)
+            direction = floating_market_direction_payload()
+            authorization_attempts = []
+
+            def authorization_route(route):
+                authorization_attempts.append(json.loads(route.request.post_data or "{}"))
+                body = authorization_attempts[-1]
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "authorization_id": "test-auth-floating-market-browser",
+                            "available": True,
+                            "kind": "first_cut",
+                            "scene_key": body["scene_key"],
+                            "source_signature": body["source_signature"],
+                            "model": body["model"],
+                            "source": "authorized_test_attempt",
+                            "duration_seconds": 8,
+                            "aspect_ratio": "16:9",
+                            "audio_enabled": False,
+                        }
+                    ),
+                )
+
+            page.route("**/api/video-test-authorization", authorization_route)
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.fill(
+                "#screenplay",
+                "A floating ocean market carries a blue robot, fruit, crates, tools, and a courier bag.",
+            )
+            page.evaluate(
+                """payload => {
+                    renderDirectedResult(payload);
+                    renderAllVideoStates();
+                }""",
+                direction,
+            )
+            page.wait_for_function(
+                "document.querySelector('#activateFloatingMarketTest')?.hidden === false"
+            )
+            assert authorization_attempts == []
+            assert page.locator("#activateFloatingMarketTest").inner_text() == (
+                "Activate authorized test attempt"
+            )
+            assert page.locator("#generateFirstCut").is_hidden()
+            assert page.locator("#generateVeo").is_hidden()
+            assert "activate the authorized test attempt" in (
+                page.locator("#firstCutMessage").inner_text().lower()
+            )
+
+            page.evaluate(
+                """() => {
+                    const button = document.querySelector('#activateFloatingMarketTest');
+                    button.click();
+                    button.click();
+                }"""
+            )
+            page.wait_for_function(
+                "document.querySelector('#activateFloatingMarketTest')?.hidden === true"
+            )
+
+            assert len(authorization_attempts) == 1
+            assert authorization_attempts[0]["analysis_source"] == "vertex_multimodal"
+            assert authorization_attempts[0]["kind"] == "first_cut"
+            assert page.evaluate("canOpenFirstCutApproval()") is True
+            assert page.locator("#generateFirstCut").is_enabled()
+            assert page.locator("#generateVeo").is_enabled()
+            page.wait_for_function(
+                """() => document.querySelector('#videoAllowanceMessage')?.innerText
+                    .includes('One authorized First Cut test attempt available')"""
+            )
+            assert "One authorized First Cut test attempt available" in (
+                page.locator("#videoAllowanceMessage").inner_text()
+            )
+            assert counts == {"approval": 0, "submission": 0}
         finally:
             browser.close()
 
@@ -1386,8 +1691,8 @@ def test_legacy_restored_direction_is_labeled_and_cannot_be_approved():
                 "document.querySelector('#stage')?.dataset.state === 'completed'"
             )
             assert page.locator("#analysisSource").inner_text() == "Legacy/fallback result"
-            assert page.locator("#generateVeo").is_disabled()
-            assert page.locator("#generateFirstCut").is_disabled()
+            assert page.locator("#generateVeo").is_hidden()
+            assert page.locator("#generateFirstCut").is_hidden()
         finally:
             browser.close()
 
@@ -1414,7 +1719,7 @@ def test_vertex_first_cut_terminal_and_active_states_block_resubmission(job_stat
             page.wait_for_function(
                 f"document.querySelector('#firstCutStatus')?.innerText === '{'STATUS UNCERTAIN' if job_status == 'submission_unknown' else job_status.upper()}'",
             )
-            assert page.locator("#generateVeo").is_disabled()
-            assert page.locator("#generateFirstCut").is_disabled()
+            assert page.locator("#generateVeo").is_hidden()
+            assert page.locator("#generateFirstCut").is_hidden()
         finally:
             browser.close()

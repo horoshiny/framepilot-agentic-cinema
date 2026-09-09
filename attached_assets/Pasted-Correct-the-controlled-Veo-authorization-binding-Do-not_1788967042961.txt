@@ -1,0 +1,39 @@
+Correct the controlled Veo authorization binding. Do not call Gemini, Vertex AI, Veo, Cloud Storage, Direct Scene, approval, or video generation during this task.
+
+The authorization `test-auth-castors-day-first-cut` was incorrectly bound to:
+
+* Scene: `scene-469d000e`
+* Source signature: `scene-9743b7b2`
+
+Those identifiers belong to the previously completed flooded-observatory First Cut—not the current Castor’s Day image. The authorization name is not evidence of correct scene binding.
+
+1. Confirm the incorrect authorization remains `available`, with no reservation, submission, job, operation ID, or consumption.
+2. Mark that unused authorization as `revoked_wrong_scene` while preserving its audit record.
+3. Never infer the active scene from an old completed video job, the authorization name, or the Agent preview session.
+4. Locate the exact latest successful Castor’s Day Direct analysis only if it is durably associated with the requesting client/session. Verify all of:
+
+   * `analysis_source = vertex_multimodal`
+   * The uploaded Castor’s Day storyboard handle exists
+   * Four distinct brothers are under Main Characters
+   * Castor props—including the stuffed panda and books—are under Objects
+   * The client/session, scene key, source signature, and image handle agree
+   * Model is `veo-3.1-generate-001`
+5. If those exact identifiers cannot be proven server-side, do not guess and do not create a bound authorization. Instead, implement a one-time `Activate authorized test attempt` action for the user’s current browser session:
+
+   * The browser sends its current scene key, source signature, storyboard-image handle, and analysis source.
+   * The server validates session ownership, `vertex_multimodal`, the existing image, current scene/source match, `first_cut`, and the required model.
+   * It atomically binds one pending controlled authorization to that exact Castor’s Day scene.
+   * Activation must not reserve or consume it and must not contact any provider.
+   * After activation, show `One authorized Castor’s Day test First Cut available`.
+6. The old observatory scene, default Forest Cabin, another client, another image, another source signature, and Director’s Cut must remain ineligible.
+7. Opening approval must not consume the corrected authorization. Only one explicit final Approve click may reserve it.
+
+Add offline coverage for correct session claiming, all mismatches, atomic one-time binding, non-consumption during activation/approval, and zero provider calls. Run the full mock-only suite, restart once, and report:
+
+* Incorrect authorization’s final state
+* Correct Castor scene key, source signature, image handle, and proof of ownership
+* Correct authorization ID/state
+* UI eligibility
+* Confirmation that no external/provider request occurred
+
+Do not submit the Veo request.

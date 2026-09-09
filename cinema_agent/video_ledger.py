@@ -79,7 +79,7 @@ class VideoLedger:
                     client_ip TEXT,
                     kind TEXT NOT NULL,
                     allowance_source TEXT NOT NULL DEFAULT 'normal'
-                        CHECK (allowance_source IN ('normal', 'authorized_replacement')),
+                        CHECK (allowance_source IN ('normal', 'authorized_replacement', 'authorized_test_attempt')),
                     replacement_for_job_id TEXT,
                     controlled_authorization_id TEXT,
                     state TEXT NOT NULL CHECK (state IN ('pending', 'unknown', 'accepted', 'released')),
@@ -149,10 +149,10 @@ class VideoLedger:
                     reserved_job_id TEXT,
                     reserved_at REAL,
                     consumed_at REAL,
-                    released_at REAL
+                    released_at REAL,
+                    revoked_at REAL,
+                    revocation_reason TEXT
                 );
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_video_test_authorization_singleton
-                    ON video_test_authorizations(authorization_source);
                 CREATE INDEX IF NOT EXISTS idx_video_replacement_client
                     ON video_replacement_authorizations(client_id, state);
                 CREATE INDEX IF NOT EXISTS idx_durable_video_active
@@ -179,6 +179,70 @@ class VideoLedger:
                 except sqlite3.OperationalError as exc:
                     if "duplicate column name" not in str(exc).lower():
                         raise
+            authorization_sql = connection.execute(
+                "SELECT sql FROM sqlite_master "
+                "WHERE type = 'table' AND name = 'video_test_authorizations'"
+            ).fetchone()[0]
+            if "revoked_wrong_scene" not in authorization_sql:
+                connection.execute("DROP INDEX IF EXISTS idx_video_test_authorization_singleton")
+                connection.execute(
+                    """
+                    CREATE TABLE video_test_authorizations_new (
+                        authorization_id TEXT PRIMARY KEY,
+                        client_id TEXT NOT NULL,
+                        scene_key TEXT NOT NULL,
+                        source_signature TEXT NOT NULL,
+                        kind TEXT NOT NULL CHECK (kind = 'first_cut'),
+                        model TEXT NOT NULL,
+                        authorization_source TEXT NOT NULL
+                            CHECK (authorization_source = 'authorized_test_attempt'),
+                        state TEXT NOT NULL DEFAULT 'available'
+                            CHECK (state IN ('available', 'reserved', 'consumed', 'revoked_wrong_scene')),
+                        created_at REAL NOT NULL,
+                        reserved_job_id TEXT,
+                        reserved_at REAL,
+                        consumed_at REAL,
+                        released_at REAL,
+                        revoked_at REAL,
+                        revocation_reason TEXT
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO video_test_authorizations_new
+                        (authorization_id, client_id, scene_key, source_signature, kind, model,
+                         authorization_source, state, created_at, reserved_job_id, reserved_at,
+                         consumed_at, released_at)
+                    SELECT authorization_id, client_id, scene_key, source_signature, kind, model,
+                           authorization_source, state, created_at, reserved_job_id, reserved_at,
+                           consumed_at, released_at
+                    FROM video_test_authorizations
+                    """
+                )
+                connection.execute("DROP TABLE video_test_authorizations")
+                connection.execute(
+                    "ALTER TABLE video_test_authorizations_new RENAME TO video_test_authorizations"
+                )
+            else:
+                for column, definition in (
+                    ("revoked_at", "REAL"),
+                    ("revocation_reason", "TEXT"),
+                ):
+                    try:
+                        connection.execute(
+                            f"ALTER TABLE video_test_authorizations ADD COLUMN {column} {definition}"
+                        )
+                    except sqlite3.OperationalError as exc:
+                        if "duplicate column name" not in str(exc).lower():
+                            raise
+            connection.execute("DROP INDEX IF EXISTS idx_video_test_authorization_singleton")
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_video_test_authorization_state
+                    ON video_test_authorizations(authorization_source, state)
+                """
+            )
             connection.execute(
                 "UPDATE durable_video_jobs SET client_ip = client_id WHERE client_ip IS NULL OR client_ip = ''"
             )
@@ -217,8 +281,9 @@ class VideoLedger:
                         client_ip TEXT,
                         kind TEXT NOT NULL,
                         allowance_source TEXT NOT NULL DEFAULT 'normal'
-                            CHECK (allowance_source IN ('normal', 'authorized_replacement')),
+                            CHECK (allowance_source IN ('normal', 'authorized_replacement', 'authorized_test_attempt')),
                         replacement_for_job_id TEXT,
+                        controlled_authorization_id TEXT,
                         state TEXT NOT NULL CHECK (state IN ('pending', 'unknown', 'accepted', 'released')),
                         accepted_at REAL,
                         created_at REAL NOT NULL
@@ -229,9 +294,9 @@ class VideoLedger:
                     """
                     INSERT INTO video_generation_submissions
                         (job_id, client_id, client_ip, kind, allowance_source,
-                         replacement_for_job_id, state, accepted_at, created_at)
+                         replacement_for_job_id, controlled_authorization_id, state, accepted_at, created_at)
                     SELECT job_id, client_id, client_id, kind, 'normal',
-                           NULL, state, accepted_at, created_at
+                           NULL, NULL, state, accepted_at, created_at
                     FROM video_generation_submissions_legacy
                     """
                 )
@@ -248,6 +313,67 @@ class VideoLedger:
                         ON video_generation_submissions(client_ip, state)
                     """
                 )
+            submission_sql = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'video_generation_submissions'"
+            ).fetchone()[0]
+            if "authorized_test_attempt" not in submission_sql:
+                connection.execute("DROP INDEX IF EXISTS idx_video_submissions_client")
+                connection.execute("DROP INDEX IF EXISTS idx_video_submissions_ip")
+                connection.execute(
+                    """
+                    ALTER TABLE video_generation_submissions
+                    RENAME TO video_generation_submissions_legacy
+                    """
+                )
+                connection.execute(
+                    """
+                    CREATE TABLE video_generation_submissions (
+                        job_id TEXT PRIMARY KEY,
+                        client_id TEXT NOT NULL,
+                        client_ip TEXT,
+                        kind TEXT NOT NULL,
+                        allowance_source TEXT NOT NULL DEFAULT 'normal'
+                            CHECK (allowance_source IN ('normal', 'authorized_replacement', 'authorized_test_attempt')),
+                        replacement_for_job_id TEXT,
+                        controlled_authorization_id TEXT,
+                        state TEXT NOT NULL CHECK (state IN ('pending', 'unknown', 'accepted', 'released')),
+                        accepted_at REAL,
+                        created_at REAL NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO video_generation_submissions
+                        (job_id, client_id, client_ip, kind, allowance_source,
+                         replacement_for_job_id, controlled_authorization_id, state,
+                         accepted_at, created_at)
+                    SELECT job_id, client_id, client_ip, kind, allowance_source,
+                           replacement_for_job_id, controlled_authorization_id, state,
+                           accepted_at, created_at
+                    FROM video_generation_submissions_legacy
+                    """
+                )
+                connection.execute("DROP TABLE video_generation_submissions_legacy")
+                connection.execute(
+                    """
+                    CREATE INDEX idx_video_submissions_client
+                        ON video_generation_submissions(client_id, state)
+                    """
+                )
+                connection.execute(
+                    """
+                    CREATE INDEX idx_video_submissions_ip
+                        ON video_generation_submissions(client_ip, state)
+                    """
+                )
+            connection.execute(
+                """
+                UPDATE video_generation_submissions
+                SET allowance_source = 'authorized_test_attempt'
+                WHERE controlled_authorization_id IS NOT NULL
+                """
+            )
             connection.execute(
                 "UPDATE video_generation_submissions SET client_ip = client_id WHERE client_ip IS NULL OR client_ip = ''"
             )
@@ -275,10 +401,12 @@ class VideoLedger:
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT *
-                FROM durable_video_jobs
-                WHERE client_id = ? AND kind = ? AND status = 'completed'
-                ORDER BY updated_at DESC
+                SELECT j.*, s.allowance_source AS submission_allowance_source,
+                       s.controlled_authorization_id AS submission_controlled_authorization_id
+                FROM durable_video_jobs AS j
+                LEFT JOIN video_generation_submissions AS s ON s.job_id = j.job_id
+                WHERE j.client_id = ? AND j.kind = ? AND j.status = 'completed'
+                ORDER BY j.updated_at DESC
                 LIMIT 1
                 """,
                 (client_id, kind),
@@ -417,7 +545,11 @@ class VideoLedger:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             existing = connection.execute(
-                "SELECT * FROM video_test_authorizations WHERE authorization_source = 'authorized_test_attempt'"
+                """
+                SELECT * FROM video_test_authorizations
+                WHERE authorization_source = 'authorized_test_attempt'
+                  AND state IN ('available', 'reserved')
+                """
             ).fetchone()
             if existing:
                 connection.execute("COMMIT")
@@ -437,6 +569,130 @@ class VideoLedger:
                 VALUES (?, ?, ?, ?, 'first_cut', ?, 'authorized_test_attempt', ?)
                 """,
                 (authorization_id, client_id, scene_key, source_signature, model, created_at),
+            )
+            connection.execute("COMMIT")
+            row = connection.execute(
+                "SELECT * FROM video_test_authorizations WHERE authorization_id = ?",
+                (authorization_id,),
+            ).fetchone()
+            return self._controlled_authorization_from_row(row)
+
+    def revoke_controlled_test_authorization(
+        self,
+        authorization_id: str,
+        *,
+        reason: str,
+        revoked_at: float,
+    ) -> ControlledAuthorization:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM video_test_authorizations WHERE authorization_id = ?",
+                (authorization_id,),
+            ).fetchone()
+            if not row:
+                connection.execute("ROLLBACK")
+                raise ValueError("Controlled authorization does not exist.")
+            if row["state"] != "available":
+                connection.execute("ROLLBACK")
+                raise ValueError("Only an unused controlled authorization can be revoked.")
+            updated = connection.execute(
+                """
+                UPDATE video_test_authorizations
+                SET state = 'revoked_wrong_scene', revoked_at = ?, revocation_reason = ?,
+                    reserved_job_id = NULL, reserved_at = NULL, released_at = NULL
+                WHERE authorization_id = ? AND state = 'available'
+                """,
+                (revoked_at, reason, authorization_id),
+            )
+            if updated.rowcount != 1:
+                connection.execute("ROLLBACK")
+                raise ValueError("Controlled authorization could not be revoked.")
+            connection.execute("COMMIT")
+            row = connection.execute(
+                "SELECT * FROM video_test_authorizations WHERE authorization_id = ?",
+                (authorization_id,),
+            ).fetchone()
+            return self._controlled_authorization_from_row(row)
+
+    def activate_controlled_test_authorization(
+        self,
+        *,
+        client_id: str,
+        scene_key: str,
+        source_signature: str,
+        model: str,
+        authorization_id: str,
+        activated_at: float,
+    ) -> ControlledAuthorization:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            active_job = connection.execute(
+                """
+                SELECT job_id FROM durable_video_jobs
+                WHERE client_id = ? AND scene_key = ? AND kind = 'first_cut'
+                  AND status IN ('submitting', 'submission_unknown', 'queued', 'generating')
+                LIMIT 1
+                """,
+                (client_id, scene_key),
+            ).fetchone()
+            if active_job:
+                connection.execute("ROLLBACK")
+                raise ValueError("An active First Cut already exists for this scene.")
+            active = connection.execute(
+                """
+                SELECT * FROM video_test_authorizations
+                WHERE authorization_source = 'authorized_test_attempt'
+                  AND state IN ('available', 'reserved')
+                """
+            ).fetchone()
+            if active:
+                if (
+                    active["client_id"] != client_id
+                    or active["scene_key"] != scene_key
+                    or active["source_signature"] != source_signature
+                    or active["model"] != model
+                ):
+                    if active["state"] != "available":
+                        connection.execute("ROLLBACK")
+                        raise ValueError(
+                            "The controlled authorization is already reserved by another session or scene."
+                        )
+                    connection.execute(
+                        """
+                        UPDATE video_test_authorizations
+                        SET state = 'revoked_wrong_scene',
+                            revoked_at = ?,
+                            revocation_reason = ?,
+                            reserved_job_id = NULL,
+                            reserved_at = NULL,
+                            released_at = NULL
+                        WHERE authorization_id = ? AND state = 'available'
+                        """,
+                        (
+                            activated_at,
+                            "abandoned_session",
+                            active["authorization_id"],
+                        ),
+                    )
+                else:
+                    connection.execute("COMMIT")
+                    return self._controlled_authorization_from_row(active)
+            connection.execute(
+                """
+                INSERT INTO video_test_authorizations
+                    (authorization_id, client_id, scene_key, source_signature, kind, model,
+                     authorization_source, state, created_at)
+                VALUES (?, ?, ?, ?, 'first_cut', ?, 'authorized_test_attempt', 'available', ?)
+                """,
+                (
+                    authorization_id,
+                    client_id,
+                    scene_key,
+                    source_signature,
+                    model,
+                    activated_at,
+                ),
             )
             connection.execute("COMMIT")
             row = connection.execute(
@@ -659,7 +915,11 @@ class VideoLedger:
                     client_id,
                     client_ip or client_id,
                     kind,
-                    "authorized_replacement" if replacement_for_job_id else "normal",
+                    "authorized_replacement"
+                    if replacement_for_job_id
+                    else "authorized_test_attempt"
+                    if controlled_authorization_id
+                    else "normal",
                     replacement_for_job_id,
                     controlled_authorization_id,
                     created_at,

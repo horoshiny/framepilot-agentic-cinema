@@ -1,0 +1,40 @@
+Fix the disabled First Cut eligibility for the current floating-ocean-market scene. Do not call Gemini, Vertex AI, Veo, Cloud Storage, Direct Scene, approval or video generation.
+
+Important correction: the valid analysis-source value is `vertex_multimodal`, not `vertextex_multimodal`.
+
+Diagnose the exact current disabled reason and inspect the controlled authorization created by the previous task.
+
+1. Report the authorization:
+
+   * ID and state
+   * Bound client/session
+   * Scene key
+   * Source signature
+   * Image handle
+   * Model and kind
+   * Reservation or consumption state
+2. Compare it with the floating-market scene currently stored by the user’s browser session.
+3. Do not use the Replit Agent preview session, default Forest Cabin, Castor’s Day or the observatory scene.
+4. The correct floating-market scene must have:
+
+   * `analysis_source = vertex_multimodal`
+   * Three main characters
+   * Blue robot and market props
+   * The uploaded floating-market storyboard
+5. If the existing authorization is unbound or incorrectly bound and still completely unused, revoke it with an audit reason. Do not delete or rewrite its history.
+6. If Replit cannot access the user’s browser-owned scene identifiers, expose a one-time `Activate authorized floating-market test` button in the current user session:
+
+   * The browser supplies its current scene key, source signature and image handle.
+   * The backend verifies session ownership, `vertex_multimodal`, existing storyboard image, model and `first_cut`.
+   * Atomically bind one pending controlled authorization.
+   * Activation must not reserve or consume it.
+7. After successful activation:
+
+   * Show `One authorized floating-market test First Cut available`.
+   * Enable both Generate First Cut and Generate with Veo.
+   * Rerender immediately after the allowance response—no additional Direct request or refresh should be required.
+8. Display the exact remaining disabled reason if eligibility is still false. Never silently leave the button disabled.
+9. Add a mocked browser regression for this precise flow, including activation from a browser session that differs from the Agent preview session.
+10. Run the full mock-only suite and restart once.
+
+Do not open approval or submit generation. Report the final authorization ID/state, matched scene/source/image identifiers, `canOpenFirstCutApproval()` result, `button.disabled` value and confirmation that no provider request occurred.

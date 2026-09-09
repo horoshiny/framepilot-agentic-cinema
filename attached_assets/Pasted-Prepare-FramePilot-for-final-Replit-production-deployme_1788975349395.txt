@@ -1,0 +1,57 @@
+Prepare FramePilot for final Replit production deployment. Do not call Gemini, Vertex AI, Veo or Cloud Storage. Do not run Direct Scene or create an approval, video job or authorization during this task.
+
+Before deployment:
+
+1. Confirm both completed First Cuts still restore and play after refresh:
+
+   * Flooded celestial observatory
+   * Floating ocean market
+2. Confirm their screenplay, creative intent, storyboard and video output remain separate and correctly scoped to their owning sessions.
+3. Verify that refresh uses GET-only restoration and can never resubmit video generation.
+4. Run:
+
+   * Complete mock-only test suite
+   * Python syntax checks
+   * JavaScript syntax checks
+   * `git diff --check`
+5. Confirm the public repository contains:
+
+   * All source code and required assets
+   * Installation and startup instructions
+   * Environment-variable documentation without secret values
+   * Actual Gemini, Vertex AI and Veo imports and runtime calls
+   * A root-level OSI-approved `LICENSE`
+6. Verify that production starts on `0.0.0.0` using Replit’s assigned `$PORT`.
+7. Keep Direct Scene and Motion Preview available to public visitors.
+8. Do not expose unlimited paid Veo generation. Paid generation must require a server-validated, scene-bound, session-bound, one-time authorization and one explicit final approval.
+9. When no Veo authorization is available:
+
+   * Hide unusable generation buttons instead of showing confusing disabled controls.
+   * Show one concise message explaining that live Veo generation is capacity-limited.
+   * Keep completed real Veo examples available as product demonstrations where session ownership permits.
+10. Hide internal job IDs, operation IDs, raw JSON and technical provider diagnostics from the normal interface. Preserve diagnostics in the backend and show bounded technical details only for an actual failure.
+11. Commit only relevant application changes.
+12. Push `main` to the configured public GitHub repository without force-pushing.
+13. Prepare and deploy `main` using a Replit production deployment. Do not treat the temporary development Preview URL as the final hosted-project URL.
+
+After deployment, verify in a fresh browser session:
+
+* Root endpoint returns HTTP 200
+* Health endpoint returns HTTP 200
+* Static assets load successfully
+* No browser-console errors occur
+* No secret values appear in HTML or logs
+
+Report:
+
+* Public `replit.app` URL
+* Public GitHub repository URL
+* Final commit hash
+* Test total
+* License name and path
+* Production health results
+* Whether both completed Veo outputs remain recoverable
+* Confirmation that no Gemini, Vertex AI, Veo, Cloud Storage or generation request occurred during deployment
+* Any final manual Publish or Deploy button I must click
+
+Do not create the final fight-scene authorization yet. It must be created for the exact fight scene and browser session on the deployed site after a successful Vertex multimodal Direct Scene run.

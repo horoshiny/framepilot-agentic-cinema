@@ -30,6 +30,8 @@ let videoProvider = null;
 let videoModel = null;
 let videoEstimate = null;
 let controlledTestAuthorization = null;
+let controlledTestAuthorizationError = null;
+let controlledTestAuthorizationBusy = false;
 let healthLoaded = false;
 let conservativePlanConfirmed = false;
 let videoCritique = null;
@@ -173,8 +175,14 @@ function firstCutDisabledReason() {
   if (isVertexVideoProvider() && !hasStoryboardImage()) {
     return 'Upload a storyboard image before requesting a Vertex First Cut.';
   }
+  if (isVertexVideoProvider() && realAllowanceUnavailable() && !hasAvailableControlledTestAuthorization()) {
+    if (controlledTestAuthorizationError) {
+      return `Controlled authorization unavailable: ${controlledTestAuthorizationError}`;
+    }
+    return 'Live Veo generation is capacity-limited. Activate the authorized test attempt when the current scene is eligible.';
+  }
   if (firstCutAllowanceUnavailable()) {
-    return 'Normal First Cut allowance is exhausted and no matching authorization is available.';
+    return 'Live Veo generation is capacity-limited. No authorized First Cut attempt is available for this scene.';
   }
   return 'First Cut is ready for explicit approval.';
 }
@@ -248,7 +256,7 @@ function renderVideoProviderCopy() {
         ? hasAvailableReplacementAuthorization()
           ? `Normal First Cut allowance: ${videoAllowance.global_used} used / ${videoAllowance.global_remaining} remaining. Authorized replacement: ${videoAllowance.authorized_replacement_remaining} remaining. Authorized replacement attempt available.`
           : `Normal First Cut allowance: ${videoAllowance.global_used} used / ${videoAllowance.global_remaining} remaining. Authorized replacement: ${videoAllowance.authorized_replacement_remaining} remaining.`
-        : 'First Cut allowance exhausted.'
+        : 'Live Veo generation is capacity-limited.'
       : 'Demo generation limit reached.';
   setTextIfPresent('#videoAllowanceMessage', allowanceMessage);
   const allowanceElement = $('#videoAllowanceMessage');
@@ -261,10 +269,44 @@ function renderGenerateVeoButton() {
   const button = $('#generateVeo');
   if (!button) return;
   const needsGenerativeVideo = data?.routing?.classification === 'GENERATIVE_VIDEO_REQUIRED';
+  const available = needsGenerativeVideo && canOpenFirstCutApproval();
+  button.hidden = !needsGenerativeVideo || Boolean(data?.routing?.local_approximation_selected) || !available;
   button.disabled = !(
-    needsGenerativeVideo
-      && canOpenFirstCutApproval()
+    available
   );
+}
+
+function renderControlledAuthorizationAction() {
+  const button = $('#activateFloatingMarketTest');
+  if (!button) return;
+  const availabilityCopy = 'One authorized First Cut test attempt available.';
+  const allowanceMessage = $('#videoAllowanceMessage');
+  if (
+    allowanceMessage
+      && videoAllowance
+      && isVertexVideoProvider()
+      && hasAvailableControlledTestAuthorization()
+      && !allowanceMessage.textContent.includes(availabilityCopy)
+  ) {
+    allowanceMessage.textContent = `${allowanceMessage.textContent} ${availabilityCopy}`.trim();
+    allowanceMessage.hidden = false;
+  }
+  const eligible = isVertexVideoProvider()
+    && Boolean(data)
+    && data.analysis_source === 'vertex_multimodal'
+    && Boolean(data.image_handle)
+    && Boolean(videoSceneKey)
+    && Boolean(videoSourceSignature)
+    && data.routing?.classification === 'GENERATIVE_VIDEO_REQUIRED'
+    && realAllowanceUnavailable()
+    && !hasAvailableReplacementAuthorization()
+    && !hasAvailableControlledTestAuthorization()
+    && !firstCutSubmissionBlocked();
+  button.hidden = !eligible;
+  button.disabled = controlledTestAuthorizationBusy;
+  button.textContent = controlledTestAuthorizationBusy
+    ? 'Activating authorized test attempt…'
+    : 'Activate authorized test attempt';
 }
 
 function setStatusLabel(selector, text, state) {
@@ -428,6 +470,7 @@ async function renderRecoveredSceneView(sceneSnapshot) {
         scene_key: sceneSnapshot.scene_key,
         source_signature: sceneSnapshot.source_signature,
       },
+      { prepareAuthorization: false },
     );
   } else {
     setRequestState('complete', 'COMPLETE', 'GENERATED VIDEO READY');
@@ -561,8 +604,8 @@ function recoveredDirectionResponse(sceneSnapshot) {
   if (!plan?.shot || !plan.motion_plan) return null;
   return {
     mode: 'recovered',
-    analysis_source: 'durable_recovery',
-    image_handle: null,
+    analysis_source: sceneSnapshot?.analysis_source || 'durable_recovery',
+    image_handle: sceneSnapshot?.storyboard_image_handle || null,
     depth_source: 'heuristic',
     plan,
     critique: {
@@ -739,7 +782,8 @@ function renderVideoState(kind) {
   const firstCutEligible = kind === 'first_cut' && canOpenFirstCutApproval();
   if (kind === 'first_cut') {
     button.disabled = !firstCutEligible;
-    button.hidden = state.status === 'completed';
+    button.hidden = state.status === 'completed'
+      || (isVertexVideoProvider() && !firstCutEligible);
   }
   if (kind === 'first_cut' && !firstCutEligible) {
     $(ids.message).replaceChildren(document.createTextNode(firstCutDisabledReason()));
@@ -764,6 +808,7 @@ function renderVideoState(kind) {
   renderOutputMode();
   renderVideoProviderCopy();
   renderGenerateVeoButton();
+  renderControlledAuthorizationAction();
 }
 
 function formatVideoTimestamp(seconds) {
@@ -861,13 +906,13 @@ function renderVideoAllowance(snapshot) {
         `Normal allowance: ${snapshot.global_used} used / ${snapshot.global_remaining} remaining. `
         + `Authorized replacement: ${snapshot.authorized_replacement_remaining} remaining.`
         + (hasAvailableControlledTestAuthorization()
-          ? ' One authorized test First Cut available.'
+           ? ' One authorized First Cut test attempt available.'
           : '')
         + (hasAvailableReplacementAuthorization()
           ? ' Authorized replacement attempt available.'
           : '');
     } else {
-      message.textContent = 'First Cut allowance exhausted.';
+      message.textContent = 'Live Veo generation is capacity-limited.';
     }
   } else if (!exhausted) {
     message.textContent = '';
@@ -888,13 +933,15 @@ async function refreshVideoAllowance() {
 
 async function prepareControlledTestAuthorization() {
   controlledTestAuthorization = null;
-  if (
-    !data
-      || data.analysis_source !== 'vertex_multimodal'
-      || !videoSceneKey
-      || !videoSourceSignature
-      || !videoModel
-  ) return;
+  controlledTestAuthorizationError = null;
+  renderControlledAuthorizationAction();
+}
+
+async function activateControlledTestAuthorization() {
+  if (controlledTestAuthorizationBusy) return;
+  controlledTestAuthorizationBusy = true;
+  controlledTestAuthorizationError = null;
+  renderControlledAuthorizationAction();
   try {
     const response = await fetch('/api/video-test-authorization', {
       method: 'POST',
@@ -905,14 +952,25 @@ async function prepareControlledTestAuthorization() {
         model: videoModel,
         kind: 'first_cut',
         image_handle: data.image_handle || null,
+        analysis_source: data.analysis_source,
       }),
     });
-    if (!response.ok) return;
-    controlledTestAuthorization = await response.json();
-  } catch {
-    controlledTestAuthorization = null;
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      controlledTestAuthorizationError = payload.detail?.message
+        || payload.detail
+        || `Activation request failed (${response.status}).`;
+    } else {
+      controlledTestAuthorization = payload;
+    }
+  } catch (error) {
+    controlledTestAuthorizationError = error.message || 'Activation request failed.';
+  } finally {
+    controlledTestAuthorizationBusy = false;
   }
-  renderVideoAllowance(videoAllowance);
+  await refreshVideoAllowance();
+  renderAllVideoStates();
+  renderControlledAuthorizationAction();
 }
 
 function renderAllVideoStates() {
@@ -1087,6 +1145,11 @@ function setVideoSceneIdentity(result, identity = null) {
     videoSourceSignature = identity.source_signature;
     return;
   }
+  if (result?.scene_key && result?.source_signature) {
+    videoSceneKey = result.scene_key;
+    videoSourceSignature = result.source_signature;
+    return;
+  }
   videoSceneKey = hashText(JSON.stringify({
     summary: result.plan.scene_summary,
     intent: result.plan.emotional_intent,
@@ -1105,11 +1168,13 @@ function videoContextPayload() {
     creative_intent: $('#mood').value,
     shot_plan: data.plan,
     image_handle: data.image_handle || null,
+    analysis_source: data.analysis_source || null,
+    direction_response: data,
     video_critique: videoCritique?.status === 'available' ? videoCritique : null,
   };
 }
 
-function renderDirectedResult(result, identity = null) {
+function renderDirectedResult(result, identity = null, { prepareAuthorization = true } = {}) {
   recoveredScenePlanAvailable = true;
   motionPreviewAvailable = true;
   setRecoveryMessage('');
@@ -1117,7 +1182,7 @@ function renderDirectedResult(result, identity = null) {
   conservativePlanConfirmed = currentMotionPlan(result)?.confirmation_required === false;
   resetVideoStates();
   setVideoSceneIdentity(result, identity);
-  void prepareControlledTestAuthorization();
+  if (prepareAuthorization) void prepareControlledTestAuthorization();
   setCutPlans(data);
   stage.classList.remove('revised');
   setPassSelection(false);
@@ -1177,7 +1242,7 @@ function configureVideoApprovalDialog(kind) {
     $('#videoGenerationAllowance').textContent = replacement
       ? 'One authorized replacement Veo generation attempt will be used.'
       : hasAvailableControlledTestAuthorization()
-        ? 'One authorized test First Cut is available. One final approval click is required.'
+        ? 'One authorized First Cut test attempt is available. One final approval click is required.'
         : 'One Veo generation request and the remaining First Cut allowance will be used.';
   }
   $('#confirmVideoApproval').textContent = vertexFirstCut ? 'Approve' : 'Approve and queue';
@@ -1975,6 +2040,9 @@ $('#useLocal').onclick = () => {
 
 $('#generateVeo').onclick = () => openVideoApproval('first_cut');
 $('#generateFirstCut').onclick = () => openVideoApproval('first_cut');
+$('#activateFloatingMarketTest').onclick = () => {
+  void activateControlledTestAuthorization();
+};
 $('#analyseFirstCut').onclick = openVideoCritiqueApproval;
 $('#confirmVideoApproval').onclick = confirmVideoApproval;
 $('#confirmVideoCritique').onclick = () => {
@@ -2072,7 +2140,11 @@ async function restoreVideoRecovery() {
       : 'No storyboard image saved';
     $('#uploadedScene').hidden = true;
     stage.classList.remove('has-upload');
-    renderDirectedResult(snapshot.direction_response, snapshot.scene);
+    renderDirectedResult(
+      snapshot.direction_response,
+      snapshot.scene,
+      { prepareAuthorization: false },
+    );
     setRecoveryMessage('');
 
     await refreshVideoAllowance();
@@ -2120,12 +2192,15 @@ async function restoreVideoRecovery() {
         renderVideoCritique(result.video_critique);
       }
     });
-
     revisionApproved = Boolean(
       videoStates.first_cut.revision_approved
       && videoStates.first_cut.status === 'completed',
     );
     renderAllVideoStates();
+    durableFirstCutRestored = Boolean(
+      videoStates.first_cut.status === 'completed'
+      && videoStates.first_cut.job_id,
+    );
     saveRecoverySnapshot();
 
     const pendingJobs = restoredJobs.filter(({ result }) => (
@@ -2172,8 +2247,39 @@ async function restoreLatestCompletedFirstCut() {
     const result = await response.json();
     if (!result || result.status !== 'completed') return;
 
+    const currentSceneMatches = Boolean(
+      data
+        && videoSceneKey === result.scene_key
+        && videoSourceSignature === result.source_signature,
+    );
+    if (
+      durableFirstCutRestored
+      && videoStates.first_cut.status === 'completed'
+      && videoStates.first_cut.job_id === result.job_id
+    ) {
+      return;
+    }
+    if (
+      durableFirstCutRestored
+      && videoStates.first_cut.status === 'completed'
+      && !currentSceneMatches
+    ) {
+      return;
+    }
     durableFirstCutRestored = true;
-    const sceneSnapshot = result.scene_snapshot;
+    const sceneSnapshot = {
+      ...(result.scene_snapshot || {}),
+      ...(
+        currentSceneMatches && hasDirectionSource(data)
+          ? {
+              screenplay: $('#screenplay').value,
+              creative_intent: $('#mood').value,
+              direction_response: data,
+              analysis_source: data.analysis_source,
+            }
+          : {}
+      ),
+    };
     let restoredMotionPreview = false;
     if (sceneSnapshot?.direction_response) {
       restoredMotionPreview = await renderRecoveredSceneView(sceneSnapshot);

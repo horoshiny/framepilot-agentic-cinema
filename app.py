@@ -1,4 +1,6 @@
 from pathlib import Path
+import hashlib
+import json
 import logging
 import re
 import secrets
@@ -230,16 +232,14 @@ def video_allowance(http_request: Request):
     "/api/video-test-authorization",
     response_model=ControlledAuthorizationStatus,
 )
-def create_video_test_authorization(
+def activate_video_test_authorization(
     request: ControlledAuthorizationRequest,
     http_request: Request,
 ):
     try:
-        return video_job_service.create_controlled_test_authorization(
+        return video_job_service.activate_controlled_test_authorization(
+            request,
             client_id=_session_id(http_request),
-            scene_key=request.scene_key,
-            source_signature=request.source_signature,
-            model=request.model,
         )
     except VideoJobError as error:
         raise _video_error(error) from error
@@ -276,6 +276,25 @@ def _session_id(http_request: Request) -> str:
 
 def _request_ip(http_request: Request) -> str:
     return http_request.client.host if http_request.client else "unknown"
+
+
+def _direct_scene_identity(plan, critique, image_handle: str | None) -> tuple[str, str]:
+    scene_payload = {
+        "summary": plan.scene_summary,
+        "intent": plan.emotional_intent,
+        "image": bool(image_handle),
+    }
+    source_payload = {
+        "shot": plan.shot.model_dump(mode="json"),
+        "motion_plan": plan.motion_plan.model_dump(mode="json"),
+        "revision": critique.revision.model_dump(mode="json"),
+    }
+
+    def digest(payload: dict) -> str:
+        serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:24]
+
+    return f"scene-{digest(scene_payload)}", f"source-{digest(source_payload)}"
 
 
 def _video_error(error: VideoJobError) -> HTTPException:
@@ -499,9 +518,19 @@ def direct_scene(request: DirectRequest, http_request: Request):
         activity.insert(3, {"step": "DIVERSITY", "detail": compiled.adjustment})
     if compiled_revision.adjustment:
         activity.insert(4, {"step": "REVISION", "detail": compiled_revision.adjustment})
+    scene_key, source_signature = _direct_scene_identity(plan, critique, image_handle)
+    video_job_service.remember_direct_context(
+        client_id=_session_id(http_request),
+        scene_key=scene_key,
+        source_signature=source_signature,
+        analysis_source=analysis_source,
+        image_handle=image_handle,
+    )
     return DirectResponse(
         mode=mode,
         analysis_source=analysis_source,
+        scene_key=scene_key,
+        source_signature=source_signature,
         image_handle=image_handle,
         depth_source=depth_source,
         plan=plan,

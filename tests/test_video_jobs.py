@@ -7,7 +7,11 @@ from fastapi.testclient import TestClient
 from app import app
 from cinema_agent.cache import analysis_cache_key
 from cinema_agent.demo import demo_plan
-from cinema_agent.schemas import VideoApprovalRequest, VideoJobRequest
+from cinema_agent.schemas import (
+    ControlledAuthorizationRequest,
+    VideoApprovalRequest,
+    VideoJobRequest,
+)
 from cinema_agent.video_jobs import (
     ApprovalRequired,
     ApprovalInvalid,
@@ -246,6 +250,45 @@ def test_controlled_first_cut_authorization_is_scene_and_client_bound_and_one_ti
     assert ledger.allowance("session-a", "127.0.0.1").authorized_replacement_remaining == 0
 
 
+def test_consumed_controlled_authorization_does_not_block_next_pending_activation(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("VIDEO_GENERATION_PROVIDER", "vertex")
+    monkeypatch.setenv("ALLOW_VEO_GENERATION", "true")
+    ledger = VideoLedger(str(tmp_path / "controlled-replacement.sqlite3"))
+
+    first = ledger.create_controlled_test_authorization(
+        client_id="old-session",
+        scene_key="scene-old",
+        source_signature="source-old",
+        model="veo-3.1-generate-001",
+        authorization_id="test-auth-old",
+        created_at=1.0,
+    )
+    assert ledger.reserve_controlled_test_authorization(
+        first.authorization_id,
+        client_id="old-session",
+        scene_key="scene-old",
+        source_signature="source-old",
+        model="veo-3.1-generate-001",
+        job_id="job-old",
+        reserved_at=2.0,
+    )
+    ledger.consume_controlled_test_authorization("job-old", 3.0)
+
+    second = ledger.create_controlled_test_authorization(
+        client_id="current-session",
+        scene_key="scene-floating-market",
+        source_signature="source-floating-market",
+        model="veo-3.1-generate-001",
+        authorization_id="test-auth-floating-market",
+        created_at=4.0,
+    )
+
+    assert second.state == "available"
+    assert second.authorization_id == "test-auth-floating-market"
+
+
 def test_controlled_authorization_approval_is_non_consuming_and_director_cut_blocked(
     monkeypatch, tmp_path
 ):
@@ -298,6 +341,256 @@ def test_controlled_authorization_approval_is_non_consuming_and_director_cut_blo
             "session-a",
         )
     assert provider.submissions == []
+
+
+def test_controlled_activation_claims_only_current_vertex_direct_context_without_provider_calls(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("VIDEO_GENERATION_PROVIDER", "vertex")
+    monkeypatch.setenv("ALLOW_VEO_GENERATION", "true")
+    provider = FakeVertexProvider()
+    ledger = VideoLedger(str(tmp_path / "controlled-activation.sqlite3"), global_limit=1, per_ip_limit=1)
+    service = MockVideoJobService(
+        provider=provider,
+        ledger=ledger,
+    )
+    image_handle = service.register_image(
+        "data:image/png;base64,ZmFrZS1jYXN0b3JzLWltYWdl",
+        "session-a",
+    )
+    service.remember_direct_context(
+        client_id="session-a",
+        scene_key="scene-castors-current",
+        source_signature="source-castors-current",
+        analysis_source="vertex_multimodal",
+        image_handle=image_handle,
+    )
+
+    request_to_activate = ControlledAuthorizationRequest(
+        scene_key="scene-castors-current",
+        source_signature="source-castors-current",
+        model="veo-3.1-generate-001",
+        kind="first_cut",
+        image_handle=image_handle,
+        analysis_source="vertex_multimodal",
+    )
+    activated = service.activate_controlled_test_authorization(
+        request_to_activate,
+        client_id="session-a",
+    )
+    repeated = service.activate_controlled_test_authorization(
+        request_to_activate,
+        client_id="session-a",
+    )
+
+    assert activated.available is True
+    assert activated.authorization_id == repeated.authorization_id
+    assert activated.scene_key == "scene-castors-current"
+    assert activated.source_signature == "source-castors-current"
+    assert provider.submissions == []
+    with ledger._connect() as connection:
+        submission_count = connection.execute(
+            "SELECT COUNT(*) FROM video_generation_submissions"
+        ).fetchone()[0]
+        row = connection.execute(
+            """
+            SELECT state, reserved_job_id, consumed_at
+            FROM video_test_authorizations
+            WHERE authorization_id = ?
+            """,
+            (activated.authorization_id,),
+        ).fetchone()
+    assert submission_count == 0
+    assert tuple(row) == ("available", None, None)
+
+
+def test_controlled_activation_reclaims_unused_closed_session_authorization(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("VIDEO_GENERATION_PROVIDER", "vertex")
+    monkeypatch.setenv("ALLOW_VEO_GENERATION", "true")
+    provider = FakeVertexProvider()
+    ledger = VideoLedger(str(tmp_path / "controlled-reclaim.sqlite3"))
+    service = MockVideoJobService(provider=provider, ledger=ledger)
+    old = ledger.create_controlled_test_authorization(
+        client_id="closed-session",
+        scene_key="scene-closed",
+        source_signature="source-closed",
+        model="veo-3.1-generate-001",
+        authorization_id="test-auth-closed",
+        created_at=1.0,
+    )
+    image_handle = service.register_image(
+        "data:image/png;base64,ZmFrZS1mbG9hdGluZy1tYXJrZXQ=",
+        "current-session",
+    )
+    service.remember_direct_context(
+        client_id="current-session",
+        scene_key="scene-floating-market",
+        source_signature="source-floating-market",
+        analysis_source="vertex_multimodal",
+        image_handle=image_handle,
+    )
+
+    activated = service.activate_controlled_test_authorization(
+        ControlledAuthorizationRequest(
+            scene_key="scene-floating-market",
+            source_signature="source-floating-market",
+            model="veo-3.1-generate-001",
+            kind="first_cut",
+            image_handle=image_handle,
+            analysis_source="vertex_multimodal",
+        ),
+        client_id="current-session",
+    )
+
+    with ledger._connect() as connection:
+        old_row = connection.execute(
+            """
+            SELECT state, revocation_reason
+            FROM video_test_authorizations
+            WHERE authorization_id = ?
+            """,
+            (old.authorization_id,),
+        ).fetchone()
+    assert activated.available is True
+    assert activated.scene_key == "scene-floating-market"
+    assert tuple(old_row) == ("revoked_wrong_scene", "abandoned_session")
+    assert provider.submissions == []
+
+
+def test_controlled_activation_rejects_an_existing_active_first_cut(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("VIDEO_GENERATION_PROVIDER", "vertex")
+    monkeypatch.setenv("ALLOW_VEO_GENERATION", "true")
+    ledger = VideoLedger(str(tmp_path / "controlled-active-scene.sqlite3"))
+    ledger.begin_submission(
+        job_id="active-first-cut",
+        client_id="current-session",
+        kind="first_cut",
+        scene_key="scene-floating-market",
+        source_signature="source-floating-market",
+        provider="vertex",
+        created_at=1.0,
+        request_fingerprint="fingerprint",
+        cache_key="cache-key",
+        model="veo-3.1-generate-001",
+    )
+    service = MockVideoJobService(provider=FakeVertexProvider(), ledger=ledger)
+    image_handle = service.register_image(
+        "data:image/png;base64,ZmFrZS1mbG9hdGluZy1tYXJrZXQ=",
+        "current-session",
+    )
+    service.remember_direct_context(
+        client_id="current-session",
+        scene_key="scene-floating-market",
+        source_signature="source-floating-market",
+        analysis_source="vertex_multimodal",
+        image_handle=image_handle,
+    )
+
+    with pytest.raises(ControlledAuthorizationUnavailable, match="active First Cut"):
+        service.activate_controlled_test_authorization(
+            ControlledAuthorizationRequest(
+                scene_key="scene-floating-market",
+                source_signature="source-floating-market",
+                model="veo-3.1-generate-001",
+                kind="first_cut",
+                image_handle=image_handle,
+                analysis_source="vertex_multimodal",
+            ),
+            client_id="current-session",
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("scene_key", "scene-other-current"),
+        ("source_signature", "source-other-current"),
+        ("model", "veo-3.1-generate-002"),
+        ("image_handle", "image-not-owned"),
+        ("analysis_source", "deterministic_fallback"),
+    ],
+)
+def test_controlled_activation_rejects_current_context_mismatches(
+    monkeypatch, tmp_path, field, value
+):
+    monkeypatch.setenv("VIDEO_GENERATION_PROVIDER", "vertex")
+    provider = FakeVertexProvider()
+    service = MockVideoJobService(
+        provider=provider,
+        ledger_path=str(tmp_path / f"activation-{field}.sqlite3"),
+    )
+    image_handle = service.register_image(
+        "data:image/png;base64,ZmFrZS1jYXN0b3JzLWltYWdl",
+        "session-a",
+    )
+    service.remember_direct_context(
+        client_id="session-a",
+        scene_key="scene-castors-current",
+        source_signature="source-castors-current",
+        analysis_source="vertex_multimodal",
+        image_handle=image_handle,
+    )
+    values = {
+        "scene_key": "scene-castors-current",
+        "source_signature": "source-castors-current",
+        "model": "veo-3.1-generate-001",
+        "kind": "first_cut",
+        "image_handle": image_handle,
+        "analysis_source": "vertex_multimodal",
+    }
+    values[field] = value
+    request_to_activate = ControlledAuthorizationRequest(**values)
+
+    with pytest.raises(ControlledAuthorizationUnavailable):
+        service.activate_controlled_test_authorization(
+            request_to_activate,
+            client_id="session-a",
+        )
+    assert provider.submissions == []
+
+
+def test_controlled_activation_is_client_bound_and_revocation_preserves_audit(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("VIDEO_GENERATION_PROVIDER", "vertex")
+    ledger = VideoLedger(str(tmp_path / "revocation.sqlite3"), global_limit=1, per_ip_limit=1)
+    old = ledger.create_controlled_test_authorization(
+        client_id="old-session",
+        scene_key="scene-observatory",
+        source_signature="source-observatory",
+        model="veo-3.1-generate-001",
+        authorization_id="test-auth-wrong-scene",
+        created_at=1.0,
+    )
+    revoked = ledger.revoke_controlled_test_authorization(
+        old.authorization_id,
+        reason="Bound to the wrong previously completed scene.",
+        revoked_at=2.0,
+    )
+    assert revoked.state == "revoked_wrong_scene"
+    with ledger._connect() as connection:
+        row = connection.execute(
+            """
+            SELECT client_id, scene_key, source_signature, state, revocation_reason,
+                   reserved_job_id, consumed_at
+            FROM video_test_authorizations
+            WHERE authorization_id = ?
+            """,
+            (old.authorization_id,),
+        ).fetchone()
+    assert tuple(row) == (
+        "old-session",
+        "scene-observatory",
+        "source-observatory",
+        "revoked_wrong_scene",
+        "Bound to the wrong previously completed scene.",
+        None,
+        None,
+    )
 
 
 def replacement_request(service, original_job_id, *, source_signature="replacement-123456"):

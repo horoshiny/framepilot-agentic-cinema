@@ -26,3 +26,9 @@ When a completed job includes its original storyboard bytes, expose them only th
 **Why:** Process-local upload handles can disappear across refreshes, while substituting or reconstructing an image risks showing the wrong scene or another client’s upload.
 
 **How to apply:** Keep storyboard availability in the persisted scene snapshot without embedding bytes in JSON, and verify recovery with GET-only browser checks.
+
+When a completed job has only a stored shot plan, a session-bound controlled Vertex job may safely reconstruct the minimal direction envelope from that plan; never replace an already-restored session scene with a different latest job.
+
+**Why:** Controlled Castor recovery had durable video and storyboard bytes but no original direction JSON, while an older completed scene could otherwise overwrite the browser’s exact session state during refresh.
+
+**How to apply:** Restore an exact saved completed job first, derive only the missing minimal plan envelope from owner-scoped durable metadata, and keep all recovery requests read-only.

@@ -1,0 +1,50 @@
+Fix the controlled-authorization activation flow for the user’s currently open Incognito session. Do not call Gemini, Vertex AI, Veo, Cloud Storage, Direct Scene, approval, or video generation.
+
+The floating-market scene is already successfully directed in the user’s current browser, but no activation control appears and First Cut remains disabled. Replit Agent’s preview session is different and must not be used to infer the user’s session.
+
+Implement this generic browser-owned claim flow:
+
+1. When the current browser has:
+
+   * `analysis_source = vertex_multimodal`
+   * A validated storyboard-image handle
+   * A current scene key and source signature
+   * A generative-video-required motion plan
+   * No active First Cut job
+   * No normal/replacement allowance
+   * One unused pending controlled-test authorization
+     show a button: `Activate authorized test attempt`.
+
+2. Clicking it sends the current browser’s scene key, source signature, image handle, model, kind and existing session cookie to a backend activation endpoint.
+
+3. The backend must validate:
+
+   * The scene belongs to that session
+   * The scene/source/image values match the stored successful Direct result
+   * Source is exactly `vertex_multimodal`
+   * Kind is `first_cut`
+   * Model is `veo-3.1-generate-001`
+   * The authorization is unused
+   * The scene has no existing active First Cut
+
+4. Revoke any unused authorization tied to the previously closed browser session with the reason `abandoned_session`. Preserve its audit history.
+
+5. Atomically bind exactly one replacement controlled-test authorization to the current browser-owned floating-market scene. Activation must leave it `available`; it must not reserve or consume it.
+
+6. Immediately refresh `/api/video-allowance` and rerender eligibility. Show:
+   `One authorized floating-market test First Cut available`
+   and enable Generate First Cut.
+
+7. Do not require Replit Agent’s browser to share the user’s session. The activation must occur through the button in the user’s actual open browser.
+
+8. Add browser tests proving:
+
+   * The activation button appears for an eligible browser-owned scene.
+   * Clicking it binds that exact session and scene.
+   * It disappears after activation.
+   * First Cut becomes enabled immediately.
+   * Closed-session authorization is not transferred.
+   * Activation makes no approval, job or provider request.
+   * Duplicate activation clicks cannot create multiple authorizations.
+
+Run the full mock-only suite and restart once. Do not create the real authorization from a script or from the Agent preview. Report the exact button state and confirm zero external calls.

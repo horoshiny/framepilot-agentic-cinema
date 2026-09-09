@@ -1,0 +1,39 @@
+Fix refresh recovery for the newly completed Castor’s Day First Cut. Do not call Gemini, Vertex AI, Veo, Cloud Storage, Direct Scene, approval, or video generation. Do not create another job or alter allowance accounting.
+
+The Castor’s Day Veo generation completed successfully and played in the browser, but refreshing returns the user to the default main page instead of restoring the completed scene and video.
+
+Diagnose using only the newest existing completed `first_cut` job, its submission record, stored scene snapshot, client/session ownership, and local output reference.
+
+Required behavior:
+
+1. Identify the newest completed Castor’s Day First Cut job without printing session secrets.
+2. Confirm:
+
+   * Job status is `completed`
+   * Model is `veo-3.1-generate-001`
+   * Allowance source is `authorized_test_attempt`
+   * Output reference exists
+   * Storyboard image handle, screenplay, creative intent, scene key and source signature are persisted
+3. Repair recovery so the same client/session restores after refresh:
+
+   * Castor’s Day storyboard
+   * Castor’s Day screenplay and creative intent
+   * `Vertex multimodal`
+   * Completed Generated Video
+   * `COMPLETED`
+   * `Vertex AI Veo · veo-3.1-generate-001 · 8 seconds`
+   * Stage 3 active
+4. Restoration must use the completed job’s own stored scene linkage—not the older default Forest Cabin, the observatory job, or whichever job happens to be newest globally.
+5. If the image or scene snapshot was not persisted correctly, recover it only from already stored local/session data. Do not contact Cloud Storage or any provider.
+6. Refresh must issue GET requests only and must never resubmit generation, reserve allowance, create approval, or create a job.
+7. Preserve both completed outputs. Do not overwrite or delete the observatory job while restoring Castor’s Day.
+8. Add mocked browser regression coverage proving:
+
+   * The completed Castor’s Day scene and video restore after refresh.
+   * Recovery is scoped to the owning client/session.
+   * The observatory output remains intact.
+   * No POST request or provider request occurs.
+   * Multiple completed scenes do not restore the wrong output.
+9. Run the full mock-only suite, restart once, and verify the real Castor’s Day video plays after refresh using GET-only requests.
+
+Report the recovered job ID, restored scene/source signature, output availability, test result, and confirmation that no external request or allowance mutation occurred.

@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 import app as app_module
 from cinema_agent.video_jobs import (
+    ControlledAuthorizationUnavailable,
     DuplicateSceneKind,
     GenerationLimitReached,
     MockVideoJobService,
@@ -134,6 +135,59 @@ def test_storyboard_image_availability_is_session_owned(isolated_mock_app):
     response = other_session.get(f"/api/storyboard-images/{image_handle}")
     assert response.status_code == 404
     assert response.json()["detail"] == "Storyboard image is no longer available for this session."
+
+
+def test_controlled_activation_endpoint_claims_only_the_current_session_scene(monkeypatch, tmp_path):
+    monkeypatch.setenv("VIDEO_GENERATION_PROVIDER", "vertex")
+    monkeypatch.setenv("ALLOW_VEO_GENERATION", "true")
+    service = MockVideoJobService(
+        provider=FakeVertexProvider(),
+        ledger_path=str(tmp_path / "controlled-endpoint.sqlite3"),
+    )
+    monkeypatch.setattr(app_module, "video_job_service", service)
+    client = TestClient(app_module.app)
+    client.get("/api/health")
+    session_id = client.cookies.get(app_module.SESSION_COOKIE_NAME)
+    image_handle = service.register_image(IMAGE_DATA_URL, session_id)
+    service.remember_direct_context(
+        client_id=session_id,
+        scene_key="scene-castors-current",
+        source_signature="source-castors-current",
+        analysis_source="vertex_multimodal",
+        image_handle=image_handle,
+    )
+
+    response = client.post(
+        "/api/video-test-authorization",
+        json={
+            "scene_key": "scene-castors-current",
+            "source_signature": "source-castors-current",
+            "model": "veo-3.1-generate-001",
+            "kind": "first_cut",
+            "image_handle": image_handle,
+            "analysis_source": "vertex_multimodal",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["available"] is True
+    assert response.json()["scene_key"] == "scene-castors-current"
+    assert service.provider.submissions == []
+
+    other_session = TestClient(app_module.app)
+    mismatch = other_session.post(
+        "/api/video-test-authorization",
+        json={
+            "scene_key": "scene-castors-current",
+            "source_signature": "source-castors-current",
+            "model": "veo-3.1-generate-001",
+            "kind": "first_cut",
+            "image_handle": image_handle,
+            "analysis_source": "vertex_multimodal",
+        },
+    )
+    assert mismatch.status_code == 409
+    assert mismatch.json()["detail"]["code"] == "controlled_authorization_unavailable"
 
 
 def test_owned_job_endpoint_returns_existing_video_critique(monkeypatch, isolated_mock_app):

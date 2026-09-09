@@ -10,3 +10,5 @@
 - [Motion confirmation source](motion-confirmation-source.md) — First Cut status and approval gating must read the nested motion plan confirmation field through one canonical accessor.
 - [First Cut pre-generation controls](first-cut-pre-generation-controls.md) — Keep approval and allowance controls outside the completed-output pane so a new First Cut remains reachable.
 - [Completed scene recovery](completed-scene-recovery.md) — Durable completed jobs must carry scene context or explicitly hide unrelated analysis state during legacy recovery.
+- [Controlled authorization binding](controlled-authorization-binding.md) — Never bind a test allowance from an old job; revoke stale rows and activate only from the current session’s verified Direct context.
+- [Floating-market authorization](floating-market-activation.md) — Floating scene evidence lives under plan.motion_plan; consumed controlled attempts must not block a later pending binding.

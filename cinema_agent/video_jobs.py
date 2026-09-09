@@ -9,6 +9,7 @@ from typing import Callable
 from uuid import uuid4
 
 from .schemas import (
+    ControlledAuthorizationRequest,
     VideoApproval,
     VideoApprovalRequest,
     VideoAllowanceStatus,
@@ -240,6 +241,7 @@ class MockVideoJobService:
         self._critique_contexts: dict[str, dict] = {}
         self._approvals: dict[str, _ApprovalRecord] = {}
         self._images: dict[str, _ImageRecord] = {}
+        self._direct_contexts: dict[str, dict[str, str | None]] = {}
         self._dedupe: dict[tuple[str, str], str] = {}
         self._scene_kinds: dict[tuple[str, str, VideoJobKind], str] = {}
         self._client_counts: dict[str, int] = {}
@@ -290,6 +292,75 @@ class MockVideoJobService:
             )
         except ValueError as exc:
             raise ControlledAuthorizationUnavailable(str(exc)) from exc
+        return self._controlled_status(authorization)
+
+    def remember_direct_context(
+        self,
+        *,
+        client_id: str,
+        scene_key: str,
+        source_signature: str,
+        analysis_source: str,
+        image_handle: str | None,
+    ) -> None:
+        with self._lock:
+            self._direct_contexts[client_id] = {
+                "scene_key": scene_key,
+                "source_signature": source_signature,
+                "analysis_source": analysis_source,
+                "image_handle": image_handle,
+            }
+
+    def activate_controlled_test_authorization(
+        self,
+        request: ControlledAuthorizationRequest,
+        *,
+        client_id: str,
+    ) -> ControlledAuthorizationStatus:
+        if self.provider_name != "vertex":
+            raise ControlledAuthorizationUnavailable(
+                "The controlled test authorization is available only for Vertex multimodal analysis."
+            )
+        if request.kind != "first_cut" or request.analysis_source != "vertex_multimodal":
+            raise ControlledAuthorizationUnavailable(
+                "Only a current Vertex multimodal First Cut can activate the controlled test."
+            )
+        try:
+            model = validate_veo_model(effective_veo_model())
+        except ProviderError as exc:
+            raise ControlledAuthorizationUnavailable(str(exc)) from exc
+        if request.model != model:
+            raise ControlledAuthorizationUnavailable(
+                "The controlled test requires the active Veo model."
+            )
+        with self._lock:
+            context = self._direct_contexts.get(client_id)
+            if (
+                not context
+                or context["scene_key"] != request.scene_key
+                or context["source_signature"] != request.source_signature
+                or context["analysis_source"] != "vertex_multimodal"
+                or context["image_handle"] != request.image_handle
+            ):
+                raise ControlledAuthorizationUnavailable(
+                    "The requested scene is not the current Direct analysis for this session."
+                )
+            self._validate_image_handle(
+                request.image_handle,
+                client_id,
+                required=True,
+            )
+            try:
+                authorization = self.ledger.activate_controlled_test_authorization(
+                    client_id=client_id,
+                    scene_key=request.scene_key,
+                    source_signature=request.source_signature,
+                    model=model,
+                    authorization_id=f"test-auth-{uuid4().hex}",
+                    activated_at=self._now(),
+                )
+            except ValueError as exc:
+                raise ControlledAuthorizationUnavailable(str(exc)) from exc
         return self._controlled_status(authorization)
 
     def controlled_test_authorization_status(
@@ -488,6 +559,9 @@ class MockVideoJobService:
                             "screenplay": critique_context["screenplay"],
                             "creative_intent": critique_context["creative_intent"],
                             "shot_plan": critique_context["shot_plan"],
+                            "analysis_source": critique_context["analysis_source"],
+                            "image_handle": critique_context["image_handle"],
+                            "direction_response": critique_context["direction_response"],
                         },
                         ensure_ascii=False,
                         separators=(",", ":"),
@@ -834,13 +908,52 @@ class MockVideoJobService:
             return None
         if not isinstance(context, dict):
             return None
+        analysis_source = (
+            context.get("analysis_source")
+            or (
+                "vertex_multimodal"
+                if row.get("submission_controlled_authorization_id")
+                else None
+            )
+        )
+        direction_response = context.get("direction_response")
+        if (
+            not direction_response
+            and analysis_source == "vertex_multimodal"
+            and context.get("shot_plan")
+        ):
+            direction_response = {
+                "mode": "recovered",
+                "analysis_source": analysis_source,
+                "image_handle": context.get("image_handle"),
+                "depth_source": "heuristic",
+                "plan": context["shot_plan"],
+                "critique": {
+                    "diagnosis": "Recovered from the completed Vertex scene record.",
+                    "revision_rationale": "The original revision analysis was not persisted.",
+                    "revision": {},
+                    "focus_score": None,
+                    "pacing_score": None,
+                    "cinematic_motion_score": None,
+                },
+                "routing": {
+                    "classification": "GENERATIVE_VIDEO_REQUIRED",
+                    "rationale": "Recovered from the completed Vertex scene record.",
+                    "matched_actions": [],
+                },
+                "activity": [
+                    {"step": "DIRECT", "detail": "Completed Vertex scene restored."},
+                ],
+            }
         return {
             "scene_key": job.scene_key,
             "source_signature": job.source_signature,
             "screenplay": context.get("screenplay"),
             "creative_intent": context.get("creative_intent"),
-            "direction_response": context.get("direction_response"),
+            "direction_response": direction_response,
             "shot_plan": context.get("shot_plan"),
+            "analysis_source": analysis_source,
+            "storyboard_image_handle": context.get("image_handle"),
             "storyboard_url": (
                 f"/api/video-jobs/{job.job_id}/storyboard"
                 if row.get("storyboard_bytes")
@@ -935,6 +1048,9 @@ class MockVideoJobService:
             "screenplay": request.screenplay,
             "creative_intent": request.creative_intent,
             "shot_plan": request.shot_plan.model_dump(),
+            "analysis_source": request.analysis_source,
+            "image_handle": request.image_handle,
+            "direction_response": request.direction_response,
             "storyboard_bytes": image_record.image_bytes if image_record and image_record.client_id == client_id else None,
             "storyboard_mime_type": image_record.mime_type
             if image_record and image_record.client_id == client_id
