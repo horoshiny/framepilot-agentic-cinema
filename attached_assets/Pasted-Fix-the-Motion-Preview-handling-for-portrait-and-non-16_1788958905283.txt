@@ -1,0 +1,53 @@
+Fix the Motion Preview handling for portrait and non-16:9 storyboard images.
+
+This is a small isolated frontend correction. Do not change Direct analysis, motion-plan logic, completed-video recovery, Veo generation or backend behavior. Do not call any provider.
+
+Current bug:
+
+* Portrait images are rendered with a cover-style crop.
+* The top title, bottom objects and parts of the composition disappear.
+* The preview therefore does not accurately represent the supplied storyboard.
+
+Implement:
+
+1. Preserve the entire uploaded image in Motion Preview.
+
+* Use contain-style fitting for portrait and square images.
+* Centre the source image without stretching or deforming it.
+* Preserve its original aspect ratio.
+* Never crop visible characters, objects or text by default.
+
+2. Fill unused landscape space elegantly.
+
+* Create a blurred, darkened background layer using the same source image.
+* Place the complete sharp source image above it.
+* Keep the background subtle so it does not look like duplicated content.
+* Do not add black empty space when the blurred treatment is available.
+
+3. Motion behavior
+
+* Apply the intended local pan, zoom and parallax to the contained foreground composition.
+* Keep movement within safe bounds so the image edges do not reveal empty gaps.
+* Do not crop the source merely to simulate motion.
+* Do not alter image pixels or remove text during Motion Preview.
+
+4. Landscape images
+
+* Preserve the existing good landscape behavior.
+* Use the same aspect-aware fitting logic rather than hardcoded scene-specific rules.
+
+5. Tests
+
+Add mocked frontend/browser coverage for:
+
+* Portrait image remains completely visible.
+* Square image remains completely visible.
+* Landscape image remains correctly framed.
+* No stretching or deformation.
+* Motion Preview still animates.
+* Completed Generated Video remains unaffected.
+* No provider or backend request occurs because of resizing.
+
+Run the relevant frontend tests and full mock-only suite. Show one screenshot using the Castor’s Day portrait image with the full title, all four brothers and the lower objects visible.
+
+Commit this as a small new fix on `main` and push only after the screenshot confirms the complete composition is visible.

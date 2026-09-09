@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="700" height="700" viewBox="0 0 700 700">
+  <rect width="700" height="700" fill="#24313b"/>
+  <text x="350" y="70" text-anchor="middle" fill="#f8e7bf" font-family="Georgia, serif" font-size="34">SQUARE FRAME</text>
+  <circle cx="350" cy="320" r="150" fill="#b6533f"/>
+  <circle cx="350" cy="275" r="55" fill="#e6ded1"/>
+  <path d="M190 610q160-240 320 0z" fill="#657b68"/>
+  <text x="350" y="652" text-anchor="middle" fill="#f8e7bf" font-family="sans-serif" font-size="20">FULL COMPOSITION</text>
+</svg>

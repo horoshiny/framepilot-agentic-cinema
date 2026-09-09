@@ -126,3 +126,17 @@ mtime_ms = 1788954048675
 storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:466d516e-9b9e-4311-958e-e52c4ff41069/a774d0cd-09f7-43e5-9e1a-72d199adb899/26b123e9-9952-4dd8-933c-4f1701c959c2"
 storage_version_token = "1788954079279361"
 content_type = "image/png"
+
+[[outputs]]
+id = "9LYXWcE2BF7SL3c7YIaPr"
+uri = "file://screenshots/castors-day-portrait-full-composition.png"
+type = "image"
+title = "Castor’s Day portrait Motion Preview"
+description = "Verified browser screenshot showing the complete contained portrait: full title, all four brothers, lower objects, and subtle blurred landscape fill."
+logical_id = "fda9a500-8a01-46f9-b6f6-db0ac6d27ba0"
+content_hash = "sha256:3cd839394e7cd94276bfbd2ade30938ede99ef486bb31e4c2c8e48148fdae31e"
+size = 179077
+mtime_ms = 1788959299465
+storage_uri = "gcs://replit-rams-assets-pike/rams/assets/repl:466d516e-9b9e-4311-958e-e52c4ff41069/fda9a500-8a01-46f9-b6f6-db0ac6d27ba0/5ddd87d6-4e38-4687-86f3-ca5173e565fc"
+storage_version_token = "1788959410968529"
+content_type = "image/png"

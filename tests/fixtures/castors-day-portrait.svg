@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="1000" viewBox="0 0 600 1000">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e1b28a"/>
+      <stop offset=".58" stop-color="#7b5260"/>
+      <stop offset="1" stop-color="#293344"/>
+    </linearGradient>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#76634c"/>
+      <stop offset="1" stop-color="#252a32"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="1000" fill="url(#sky)"/>
+  <text x="300" y="72" text-anchor="middle" fill="#fff8e8" font-family="Georgia, serif" font-size="38" font-weight="700">CASTOR’S DAY</text>
+  <text x="300" y="106" text-anchor="middle" fill="#f5d8ac" font-family="sans-serif" font-size="16" letter-spacing="4">A FAMILY PORTRAIT</text>
+  <circle cx="130" cy="224" r="48" fill="#c68c69"/>
+  <circle cx="285" cy="188" r="54" fill="#d8a17d"/>
+  <circle cx="434" cy="218" r="47" fill="#b97960"/>
+  <circle cx="520" cy="292" r="40" fill="#d5a17a"/>
+  <path d="M72 500v-190q58-72 116 0v190z" fill="#3d5263"/>
+  <path d="M207 500V285q78-82 156 0v215z" fill="#a84445"/>
+  <path d="M368 500V300q66-72 132 0v200z" fill="#3d6b68"/>
+  <path d="M468 500V350q52-60 104 0v150z" fill="#6a4c75"/>
+  <text x="130" y="535" text-anchor="middle" fill="#fff8e8" font-family="sans-serif" font-size="18">BROTHER 1</text>
+  <text x="285" y="560" text-anchor="middle" fill="#fff8e8" font-family="sans-serif" font-size="18">BROTHER 2</text>
+  <text x="434" y="535" text-anchor="middle" fill="#fff8e8" font-family="sans-serif" font-size="18">BROTHER 3</text>
+  <text x="520" y="535" text-anchor="middle" fill="#fff8e8" font-family="sans-serif" font-size="16">BROTHER 4</text>
+  <rect y="590" width="600" height="410" fill="url(#ground)"/>
+  <ellipse cx="300" cy="668" rx="235" ry="34" fill="#b69562"/>
+  <rect x="108" y="690" width="78" height="118" rx="12" fill="#c98c44"/>
+  <circle cx="147" cy="676" r="38" fill="#e4bd72"/>
+  <path d="M250 760h96l-12 128h-72z" fill="#9e4938"/>
+  <path d="M250 760q48-48 96 0" fill="none" stroke="#e7c078" stroke-width="12"/>
+  <rect x="414" y="702" width="94" height="110" rx="8" fill="#547263"/>
+  <path d="M430 702q31-46 62 0" fill="none" stroke="#c5ddba" stroke-width="10"/>
+  <text x="300" y="956" text-anchor="middle" fill="#f4d6a4" font-family="Georgia, serif" font-size="22">THE DAY WE CAME HOME</text>
+</svg>

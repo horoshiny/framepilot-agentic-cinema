@@ -1,7 +1,7 @@
 .uploaded-scene,.image-backing,.image-plane,.depth-debug-overlay,.particles,.agent-fog,.light-bloom{position:absolute;inset:0}
 .uploaded-scene{overflow:hidden;background:transparent}
-.image-plane{inset:0;background-color:transparent;background-position:center;background-size:cover;background-repeat:no-repeat;will-change:transform;transform-origin:center;transform:scale(1);backface-visibility:hidden;border:0;box-shadow:none;opacity:1;filter:none;mask-repeat:no-repeat;-webkit-mask-repeat:no-repeat;mask-position:center;-webkit-mask-position:center;mask-size:100% 100%;-webkit-mask-size:100% 100%;mask-mode:alpha;-webkit-mask-mode:alpha}
-.image-backing{inset:0;z-index:0;background-color:transparent;background-position:center;background-size:cover;background-repeat:no-repeat;filter:blur(9px);transform:scale(1.08);opacity:1;border:0;box-shadow:none;pointer-events:none}
+.image-plane{inset:0;background-color:transparent;background-position:center;background-size:contain;background-repeat:no-repeat;will-change:transform;transform-origin:center;transform:scale(1);backface-visibility:hidden;border:0;box-shadow:none;opacity:1;filter:none;mask-repeat:no-repeat;-webkit-mask-repeat:no-repeat;mask-position:center;-webkit-mask-position:center;mask-size:100% 100%;-webkit-mask-size:100% 100%;mask-mode:alpha;-webkit-mask-mode:alpha}
+.image-backing{inset:0;z-index:0;background-color:#11171b;background-position:center;background-size:cover;background-repeat:no-repeat;filter:blur(12px) brightness(.52);transform:scale(1.12);opacity:.82;border:0;box-shadow:none;pointer-events:none}
 .image-back{z-index:1}
 .image-mid{z-index:2}
 .image-front{z-index:3}

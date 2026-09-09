@@ -14,6 +14,8 @@ from cinema_agent.demo import demo_critique, demo_plan
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "storyboard.svg"
+PORTRAIT_FIXTURE = Path(__file__).parent / "fixtures" / "castors-day-portrait.svg"
+SQUARE_FIXTURE = Path(__file__).parent / "fixtures" / "square-storyboard.svg"
 BASE_URL = os.getenv("FRAMEPILOT_BASE_URL", "http://127.0.0.1:5000")
 SCREENPLAY = "A figure crosses the empty platform while the signal changes and rain gathers on the glass."
 OBSERVATORY_SCREENPLAY = """EXT. FLOODED CELESTIAL OBSERVATORY — BLUE HOUR
@@ -735,6 +737,99 @@ def test_uploaded_preview_is_loaded_without_an_empty_stage_overlay():
             assert "Environment" in page.locator(".scene-plan").inner_text()
             assert "Camera & Motion" in page.locator(".scene-plan").inner_text()
             assert page.get_attribute("#stage", "data-state") == "completed"
+        finally:
+            browser.close()
+
+
+@pytest.mark.parametrize(
+    ("fixture", "expected_width", "expected_height", "screenshot_name"),
+    [
+        (PORTRAIT_FIXTURE, 600, 1000, "castors-day-portrait-full-composition.png"),
+        (SQUARE_FIXTURE, 700, 700, None),
+        (FIXTURE, 960, 540, None),
+    ],
+)
+def test_motion_preview_contains_non_16_by_9_storyboards_without_resizing_requests(
+    fixture,
+    expected_width,
+    expected_height,
+    screenshot_name,
+):
+    chromium = os.getenv("CHROMIUM_PATH") or shutil.which("chromium")
+    if not chromium:
+        pytest.skip("Chromium is required for the browser preview regression test.")
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(
+            headless=True,
+            executable_path=chromium,
+        )
+        page = browser.new_page(viewport={"width": 1366, "height": 768})
+        requests = []
+        page.on("request", lambda request: requests.append((request.method, request.url)))
+        try:
+            mock_video_api(page, provider="vertex")
+            page.goto(BASE_URL, wait_until="networkidle")
+            page.set_input_files("#image", str(fixture))
+            page.wait_for_function(
+                """() => {
+                    const scene = document.querySelector('#uploadedScene');
+                    const plane = document.querySelector('.image-plane');
+                    return scene?.hidden === false && plane?.style.backgroundImage;
+                }"""
+            )
+
+            metrics = page.evaluate(
+                """async () => {
+                    const stage = document.querySelector('#stage');
+                    const plane = document.querySelector('.image-plane');
+                    const backing = document.querySelector('.image-backing');
+                    const background = getComputedStyle(plane).backgroundImage;
+                    const source = background.match(/^url\\(["']?(.*?)["']?\\)$/)?.[1];
+                    const image = new Image();
+                    image.src = source;
+                    await image.decode();
+                    return {
+                        naturalWidth: image.naturalWidth,
+                        naturalHeight: image.naturalHeight,
+                        planeFit: getComputedStyle(plane).backgroundSize,
+                        planePosition: getComputedStyle(plane).backgroundPosition,
+                        backingFit: getComputedStyle(backing).backgroundSize,
+                        backingFilter: getComputedStyle(backing).filter,
+                        stageState: stage.dataset.state,
+                    };
+                }"""
+            )
+            assert metrics["naturalWidth"] == expected_width
+            assert metrics["naturalHeight"] == expected_height
+            assert metrics["planeFit"] == "contain"
+            assert metrics["planePosition"] == "50% 50%"
+            assert metrics["backingFit"] == "cover"
+            assert "blur(" in metrics["backingFilter"]
+            assert "brightness(" in metrics["backingFilter"]
+            assert metrics["stageState"] == "image-ready"
+
+            page.click("#play")
+            page.wait_for_function(
+                """() => {
+                    const stage = document.querySelector('#stage');
+                    const plane = document.querySelector('.image-front');
+                    return stage?.classList.contains('playing')
+                        && getComputedStyle(plane).animationName !== 'none';
+                }"""
+            )
+            assert page.locator("#stage").get_attribute("data-playback-run") == "1"
+            assert not any(
+                method == "POST"
+                and any(path in url for path in ("/api/direct", "/api/video-jobs"))
+                for method, url in requests
+            )
+            assert not any(
+                "googleapis.com" in url or "vertex" in url.lower() or "gemini" in url.lower()
+                for _, url in requests
+            )
+            if screenshot_name:
+                page.screenshot(path=f"screenshots/{screenshot_name}", full_page=False)
         finally:
             browser.close()
 
