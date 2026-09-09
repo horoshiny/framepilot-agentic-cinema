@@ -114,6 +114,9 @@ _INVALID_RELATIONSHIP_WARNING = (
 _MAIN_CHARACTER_WARNING = (
     "The declared main character ID did not resolve to one visible character entity."
 )
+_MAIN_CHARACTERS_WARNING = (
+    "One or more declared main character IDs did not resolve to visible character entities."
+)
 
 
 def _clean_label_text(value: str | None) -> str:
@@ -424,26 +427,36 @@ def scene_analysis_to_shot_plan(
             conflicts.append(_INVALID_RELATIONSHIP_WARNING)
             continue
         relationships.append(relationship)
-    main_character = next(
-        (
-            entity
-            for entity in accepted_entities
-            if entity.entity_id == analysis.main_character_id
-            and entity_categories.get(entity.entity_id) == "character"
-            and _has_visual_evidence(entity)
-        ),
-        None,
-    )
-    if analysis.main_character_id and main_character is None:
-        conflicts.append(_MAIN_CHARACTER_WARNING)
+    declared_main_ids = list(analysis.main_character_ids)
+    if not declared_main_ids and analysis.main_character_id:
+        declared_main_ids = [analysis.main_character_id]
+    main_characters = [
+        entity
+        for entity in accepted_entities
+        if entity.entity_id in declared_main_ids
+        and entity_categories.get(entity.entity_id) == "character"
+        and _has_visual_evidence(entity)
+    ]
+    resolved_main_ids = {entity.entity_id for entity in main_characters}
+    if declared_main_ids and resolved_main_ids != set(declared_main_ids):
+        conflicts.append(
+            _MAIN_CHARACTER_WARNING
+            if len(declared_main_ids) == 1
+            else _MAIN_CHARACTERS_WARNING
+        )
     grounded_entities = [
         (entity, _normalize_motion_label(entity.label))
         for entity in accepted_entities
         if (_has_visual_evidence(entity) or _has_screenplay_evidence(entity))
     ]
+    focal_labels = [
+        _normalize_motion_label(entity.label)
+        for entity in main_characters
+    ]
+    focal_labels = [label for label in focal_labels if label]
     focal_subject = (
-        _normalize_motion_label(main_character.label)
-        if main_character
+        ", ".join(focal_labels)
+        if focal_labels
         else "No confidently identified focal subject."
     )
     preserved_elements = _unique(
@@ -533,6 +546,9 @@ def scene_analysis_to_shot_plan(
         movable_characters=category_candidates["character"],
         movable_objects=category_candidates["object"],
         environmental_motion=category_candidates["environment"],
+        visible_characters=analysis.characters,
+        visible_objects=analysis.objects,
+        visible_environment=analysis.environment,
         camera_movement=camera,
         preserved_elements=preserved_elements[:12],
         prohibited_changes=prohibited_changes[:16],

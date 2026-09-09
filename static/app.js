@@ -29,6 +29,7 @@ let videoAllowance = null;
 let videoProvider = null;
 let videoModel = null;
 let videoEstimate = null;
+let controlledTestAuthorization = null;
 let healthLoaded = false;
 let conservativePlanConfirmed = false;
 let videoCritique = null;
@@ -123,8 +124,22 @@ function hasAvailableReplacementAuthorization() {
   );
 }
 
+function hasAvailableControlledTestAuthorization() {
+  return Boolean(
+    isVertexVideoProvider()
+      && data?.analysis_source === 'vertex_multimodal'
+      && controlledTestAuthorization?.available
+      && controlledTestAuthorization.authorization_id
+      && controlledTestAuthorization.scene_key === videoSceneKey
+      && controlledTestAuthorization.source_signature === videoSourceSignature
+      && controlledTestAuthorization.model === videoModel,
+  );
+}
+
 function firstCutAllowanceUnavailable() {
-  return realAllowanceUnavailable() && !hasAvailableReplacementAuthorization();
+  return realAllowanceUnavailable()
+    && !hasAvailableReplacementAuthorization()
+    && !hasAvailableControlledTestAuthorization();
 }
 
 function firstCutSubmissionBlocked() {
@@ -159,7 +174,7 @@ function firstCutDisabledReason() {
     return 'Upload a storyboard image before requesting a Vertex First Cut.';
   }
   if (firstCutAllowanceUnavailable()) {
-    return 'Normal First Cut allowance is exhausted and no matching replacement is available.';
+    return 'Normal First Cut allowance is exhausted and no matching authorization is available.';
   }
   return 'First Cut is ready for explicit approval.';
 }
@@ -828,6 +843,12 @@ function renderVideoCritique(result) {
 
 function renderVideoAllowance(snapshot) {
   videoAllowance = snapshot;
+  if (!snapshot) {
+    renderVideoProviderCopy();
+    renderAllVideoStates();
+    renderGenerateVeoButton();
+    return;
+  }
   const message = $('#videoAllowanceMessage');
   renderVideoProviderCopy();
   const exhausted = isVertexVideoProvider()
@@ -839,6 +860,9 @@ function renderVideoAllowance(snapshot) {
       message.textContent =
         `Normal allowance: ${snapshot.global_used} used / ${snapshot.global_remaining} remaining. `
         + `Authorized replacement: ${snapshot.authorized_replacement_remaining} remaining.`
+        + (hasAvailableControlledTestAuthorization()
+          ? ' One authorized test First Cut available.'
+          : '')
         + (hasAvailableReplacementAuthorization()
           ? ' Authorized replacement attempt available.'
           : '');
@@ -860,6 +884,35 @@ async function refreshVideoAllowance() {
   } catch {
     // Allow the existing local/demo workflow to remain usable if status is unavailable.
   }
+}
+
+async function prepareControlledTestAuthorization() {
+  controlledTestAuthorization = null;
+  if (
+    !data
+      || data.analysis_source !== 'vertex_multimodal'
+      || !videoSceneKey
+      || !videoSourceSignature
+      || !videoModel
+  ) return;
+  try {
+    const response = await fetch('/api/video-test-authorization', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scene_key: videoSceneKey,
+        source_signature: videoSourceSignature,
+        model: videoModel,
+        kind: 'first_cut',
+        image_handle: data.image_handle || null,
+      }),
+    });
+    if (!response.ok) return;
+    controlledTestAuthorization = await response.json();
+  } catch {
+    controlledTestAuthorization = null;
+  }
+  renderVideoAllowance(videoAllowance);
 }
 
 function renderAllVideoStates() {
@@ -1064,6 +1117,7 @@ function renderDirectedResult(result, identity = null) {
   conservativePlanConfirmed = currentMotionPlan(result)?.confirmation_required === false;
   resetVideoStates();
   setVideoSceneIdentity(result, identity);
+  void prepareControlledTestAuthorization();
   setCutPlans(data);
   stage.classList.remove('revised');
   setPassSelection(false);
@@ -1122,7 +1176,9 @@ function configureVideoApprovalDialog(kind) {
     estimate.hidden = !videoEstimate;
     $('#videoGenerationAllowance').textContent = replacement
       ? 'One authorized replacement Veo generation attempt will be used.'
-      : 'One Veo generation request and the remaining First Cut allowance will be used.';
+      : hasAvailableControlledTestAuthorization()
+        ? 'One authorized test First Cut is available. One final approval click is required.'
+        : 'One Veo generation request and the remaining First Cut allowance will be used.';
   }
   $('#confirmVideoApproval').textContent = vertexFirstCut ? 'Approve' : 'Approve and queue';
   if (typeof dialog.showModal === 'function') dialog.showModal();
@@ -1162,6 +1218,10 @@ async function requestVideoApproval(kind) {
       first_cut_job_id: kind === 'director_cut' ? videoStates.first_cut.job_id : null,
       replacement_for_job_id: kind === 'first_cut'
         ? replacementAuthorizationJobId()
+        : null,
+      controlled_authorization_id: kind === 'first_cut'
+        && hasAvailableControlledTestAuthorization()
+        ? controlledTestAuthorization.authorization_id
         : null,
       ...videoContextPayload(),
     }),
@@ -1261,6 +1321,9 @@ async function createVideoJob(kind) {
   if (kind === 'director_cut') request.first_cut_job_id = videoStates.first_cut.job_id;
   if (kind === 'first_cut') {
     request.replacement_for_job_id = videoStates[kind].replacement_for_job_id || null;
+    request.controlled_authorization_id = hasAvailableControlledTestAuthorization()
+      ? controlledTestAuthorization.authorization_id
+      : null;
   }
   videoStates[kind] = { status: 'queued' };
   renderVideoState(kind);
@@ -1559,9 +1622,18 @@ function renderMotionCandidates(plan) {
   if (entityPanel) entityPanel.hidden = false;
   const groups = [
     ['cameraMotionPlan', [plan.camera_movement]],
-    ['charactersPlan', plan.movable_characters],
-    ['objectsPlan', plan.movable_objects],
-    ['environmentPlan', plan.environmental_motion],
+    [
+      'charactersPlan',
+      plan.visible_characters?.length ? plan.visible_characters : plan.movable_characters,
+    ],
+    [
+      'objectsPlan',
+      plan.visible_objects?.length ? plan.visible_objects : plan.movable_objects,
+    ],
+    [
+      'environmentPlan',
+      plan.visible_environment?.length ? plan.visible_environment : plan.environmental_motion,
+    ],
   ];
   groups.forEach(([targetId, candidates]) => {
     const container = $(`#${targetId}`);
@@ -1582,16 +1654,22 @@ function renderMotionCandidates(plan) {
         name.textContent = candidate.label;
         title.append(name);
         const action = document.createElement('p');
-        action.textContent = candidate.action;
+        action.textContent = candidate.action || 'No bounded motion proposed; preserve this visible entity.';
         const details = document.createElement('details');
         const summary = document.createElement('summary');
         summary.textContent = 'Confidence & evidence';
         const confidence = document.createElement('small');
-        confidence.textContent = `${Math.round(candidate.confidence * 100)}% confidence · ${candidate.support.replaceAll('_', ' ')}`;
+        const confidenceValue = Number.isFinite(candidate.confidence)
+          ? Math.round(candidate.confidence * 100)
+          : 0;
+        const support = candidate.support || 'needs_confirmation';
+        confidence.textContent = `${confidenceValue}% confidence · ${support.replaceAll('_', ' ')}`;
         const evidence = document.createElement('small');
-        evidence.textContent = `Visual: ${candidate.visual_evidence} Screenplay: ${candidate.screenplay_evidence}`;
+        evidence.textContent = `Visual: ${candidate.visual_evidence || 'None'} Screenplay: ${candidate.screenplay_evidence || 'None'}`;
         const bound = document.createElement('small');
-        bound.textContent = `Limit: ${candidate.bound}`;
+        bound.textContent = candidate.bound
+          ? `Limit: ${candidate.bound}`
+          : `Type: ${candidate.entity_type || 'scene entity'}`;
         details.append(summary, confidence, evidence, bound);
         item.append(title, action, details);
         container.append(item);
@@ -2141,6 +2219,7 @@ fetch('/api/health')
     renderVideoProviderCopy();
     renderAllVideoStates();
     renderGenerateVeoButton();
+    void prepareControlledTestAuthorization();
   })
   .catch(() => {});
 

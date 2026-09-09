@@ -103,6 +103,15 @@ def test_frontend_exposes_grounded_motion_plan_and_confirmation_surface():
     assert ".motion-item" in css
 
 
+def test_frontend_renders_preserved_visible_entities_without_inventing_motion():
+    app_js = (STATIC / "app.js").read_text()
+
+    assert "visible_characters" in app_js
+    assert "visible_objects" in app_js
+    assert "visible_environment" in app_js
+    assert "No bounded motion proposed; preserve this visible entity." in app_js
+
+
 def test_frontend_exposes_isolated_video_states_and_approval_flow():
     html = (STATIC / "index.html").read_text()
     app_js = (STATIC / "app.js").read_text()

@@ -21,6 +21,7 @@ from cinema_agent.video_jobs import (
     ReplacementCreditUnavailable,
     RevisionPrerequisiteFailed,
     StoryboardImageMissing,
+    ControlledAuthorizationUnavailable,
     DuplicateSceneKind,
     video_cache_key,
 )
@@ -181,6 +182,122 @@ def authorize_seeded_replacement(ledger, original_job_id="original-failed-job"):
         authorization_reason="Test-only explicit replacement authorization.",
         authorized_at=13.0,
     )
+
+
+def test_controlled_first_cut_authorization_is_scene_and_client_bound_and_one_time(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("VIDEO_GENERATION_PROVIDER", "vertex")
+    monkeypatch.setenv("ALLOW_VEO_GENERATION", "true")
+    ledger = VideoLedger(str(tmp_path / "controlled.sqlite3"), global_limit=1, per_ip_limit=1)
+    authorization = ledger.create_controlled_test_authorization(
+        client_id="session-a",
+        scene_key="scene-castors-day",
+        source_signature="source-castors-day",
+        model="veo-3.1-generate-001",
+        authorization_id="test-auth-castors-day",
+        created_at=1.0,
+    )
+
+    assert authorization.state == "available"
+    assert ledger.controlled_test_authorization(
+        authorization.authorization_id,
+        client_id="session-b",
+        scene_key=authorization.scene_key,
+        source_signature=authorization.source_signature,
+        model=authorization.model,
+    ) is None
+    assert ledger.controlled_test_authorization(
+        authorization.authorization_id,
+        client_id="session-a",
+        scene_key="scene-other",
+        source_signature=authorization.source_signature,
+        model=authorization.model,
+    ) is None
+
+    assert ledger.reserve_controlled_test_authorization(
+        authorization.authorization_id,
+        client_id="session-a",
+        scene_key=authorization.scene_key,
+        source_signature=authorization.source_signature,
+        model=authorization.model,
+        job_id="job-one",
+        reserved_at=2.0,
+    )
+    assert not ledger.reserve_controlled_test_authorization(
+        authorization.authorization_id,
+        client_id="session-a",
+        scene_key=authorization.scene_key,
+        source_signature=authorization.source_signature,
+        model=authorization.model,
+        job_id="job-two",
+        reserved_at=3.0,
+    )
+    ledger.consume_controlled_test_authorization("job-one", 4.0)
+    consumed = ledger.controlled_test_authorization(
+        authorization.authorization_id,
+        client_id="session-a",
+        scene_key=authorization.scene_key,
+        source_signature=authorization.source_signature,
+        model=authorization.model,
+    )
+    assert consumed.state == "consumed"
+    assert ledger.allowance("session-a", "127.0.0.1").global_used == 0
+    assert ledger.allowance("session-a", "127.0.0.1").authorized_replacement_remaining == 0
+
+
+def test_controlled_authorization_approval_is_non_consuming_and_director_cut_blocked(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("VIDEO_GENERATION_PROVIDER", "vertex")
+    monkeypatch.setenv("ALLOW_VEO_GENERATION", "true")
+    monkeypatch.setenv("VEO_OUTPUT_GCS_BUCKET", "offline-test-bucket")
+    provider = FakeVertexProvider()
+    service = MockVideoJobService(
+        provider=provider,
+        ledger_path=str(tmp_path / "controlled-approval.sqlite3"),
+    )
+    image_handle = service.register_image(
+        "data:image/png;base64,ZmFrZS1zdG9yeWJvYXJk",
+        "session-a",
+    )
+    authorization = service.create_controlled_test_authorization(
+        client_id="session-a",
+        scene_key="scene-castors-day",
+        source_signature="source-castors-day",
+        model="veo-3.1-generate-001",
+    )
+    pending = request(
+        scene_key="scene-castors-day",
+        source_signature="source-castors-day",
+        image_handle=image_handle,
+        controlled_authorization_id=authorization.authorization_id,
+    )
+    approval = service.request_approval(
+        VideoApprovalRequest(**pending.model_dump(exclude={"approved", "approval_id"})),
+        "session-a",
+    )
+    assert approval.controlled_authorization_id == authorization.authorization_id
+    assert service.ledger.controlled_test_authorization(
+        authorization.authorization_id,
+        client_id="session-a",
+        scene_key="scene-castors-day",
+        source_signature="source-castors-day",
+        model="veo-3.1-generate-001",
+    ).state == "available"
+    with pytest.raises(RevisionPrerequisiteFailed):
+        service.request_approval(
+            VideoApprovalRequest(
+                **pending.model_copy(
+                    update={
+                        "kind": "director_cut",
+                        "controlled_authorization_id": authorization.authorization_id,
+                    }
+                ).model_dump(exclude={"approved", "approval_id"})
+            ),
+            "session-a",
+        )
+    assert provider.submissions == []
 
 
 def replacement_request(service, original_job_id, *, source_signature="replacement-123456"):

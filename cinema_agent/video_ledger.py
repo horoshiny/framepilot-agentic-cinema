@@ -30,6 +30,18 @@ class AllowanceSnapshot:
     authorized_replacement_for_job_id: str | None = None
 
 
+@dataclass(frozen=True)
+class ControlledAuthorization:
+    authorization_id: str
+    client_id: str
+    scene_key: str
+    source_signature: str
+    kind: str
+    model: str
+    source: str
+    state: str
+
+
 class VideoLedger:
     """Durable real-generation accounting and job metadata."""
 
@@ -69,6 +81,7 @@ class VideoLedger:
                     allowance_source TEXT NOT NULL DEFAULT 'normal'
                         CHECK (allowance_source IN ('normal', 'authorized_replacement')),
                     replacement_for_job_id TEXT,
+                    controlled_authorization_id TEXT,
                     state TEXT NOT NULL CHECK (state IN ('pending', 'unknown', 'accepted', 'released')),
                     accepted_at REAL,
                     created_at REAL NOT NULL
@@ -121,6 +134,25 @@ class VideoLedger:
                     consumed_at REAL,
                     released_at REAL
                 );
+                CREATE TABLE IF NOT EXISTS video_test_authorizations (
+                    authorization_id TEXT PRIMARY KEY,
+                    client_id TEXT NOT NULL,
+                    scene_key TEXT NOT NULL,
+                    source_signature TEXT NOT NULL,
+                    kind TEXT NOT NULL CHECK (kind = 'first_cut'),
+                    model TEXT NOT NULL,
+                    authorization_source TEXT NOT NULL
+                        CHECK (authorization_source = 'authorized_test_attempt'),
+                    state TEXT NOT NULL DEFAULT 'available'
+                        CHECK (state IN ('available', 'reserved', 'consumed')),
+                    created_at REAL NOT NULL,
+                    reserved_job_id TEXT,
+                    reserved_at REAL,
+                    consumed_at REAL,
+                    released_at REAL
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_video_test_authorization_singleton
+                    ON video_test_authorizations(authorization_source);
                 CREATE INDEX IF NOT EXISTS idx_video_replacement_client
                     ON video_replacement_authorizations(client_id, state);
                 CREATE INDEX IF NOT EXISTS idx_durable_video_active
@@ -160,6 +192,7 @@ class VideoLedger:
             for column, definition in (
                 ("allowance_source", "TEXT NOT NULL DEFAULT 'normal'"),
                 ("replacement_for_job_id", "TEXT"),
+                ("controlled_authorization_id", "TEXT"),
             ):
                 try:
                     connection.execute(
@@ -358,6 +391,142 @@ class VideoLedger:
             raise ValueError("The authorized replacement is unavailable for this client or job.")
         return row
 
+    @staticmethod
+    def _controlled_authorization_from_row(row: sqlite3.Row) -> ControlledAuthorization:
+        return ControlledAuthorization(
+            authorization_id=row["authorization_id"],
+            client_id=row["client_id"],
+            scene_key=row["scene_key"],
+            source_signature=row["source_signature"],
+            kind=row["kind"],
+            model=row["model"],
+            source=row["authorization_source"],
+            state=row["state"],
+        )
+
+    def create_controlled_test_authorization(
+        self,
+        *,
+        client_id: str,
+        scene_key: str,
+        source_signature: str,
+        model: str,
+        authorization_id: str,
+        created_at: float,
+    ) -> ControlledAuthorization:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT * FROM video_test_authorizations WHERE authorization_source = 'authorized_test_attempt'"
+            ).fetchone()
+            if existing:
+                connection.execute("COMMIT")
+                if (
+                    existing["client_id"] != client_id
+                    or existing["scene_key"] != scene_key
+                    or existing["source_signature"] != source_signature
+                    or existing["model"] != model
+                ):
+                    raise ValueError("The controlled authorization is bound to another client or scene.")
+                return self._controlled_authorization_from_row(existing)
+            connection.execute(
+                """
+                INSERT INTO video_test_authorizations
+                    (authorization_id, client_id, scene_key, source_signature, kind, model,
+                     authorization_source, created_at)
+                VALUES (?, ?, ?, ?, 'first_cut', ?, 'authorized_test_attempt', ?)
+                """,
+                (authorization_id, client_id, scene_key, source_signature, model, created_at),
+            )
+            connection.execute("COMMIT")
+            row = connection.execute(
+                "SELECT * FROM video_test_authorizations WHERE authorization_id = ?",
+                (authorization_id,),
+            ).fetchone()
+            return self._controlled_authorization_from_row(row)
+
+    def controlled_test_authorization(
+        self,
+        authorization_id: str,
+        *,
+        client_id: str,
+        scene_key: str,
+        source_signature: str,
+        model: str,
+        require_available: bool = False,
+    ) -> ControlledAuthorization | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM video_test_authorizations
+                WHERE authorization_id = ? AND client_id = ? AND scene_key = ?
+                  AND source_signature = ? AND model = ? AND kind = 'first_cut'
+                """,
+                (authorization_id, client_id, scene_key, source_signature, model),
+            ).fetchone()
+        if not row or (require_available and row["state"] != "available"):
+            return None
+        return self._controlled_authorization_from_row(row)
+
+    def reserve_controlled_test_authorization(
+        self,
+        authorization_id: str,
+        *,
+        client_id: str,
+        scene_key: str,
+        source_signature: str,
+        model: str,
+        job_id: str,
+        reserved_at: float,
+        connection: sqlite3.Connection | None = None,
+    ) -> bool:
+        owns_connection = connection is None
+        connection = connection or self._connect()
+        try:
+            if owns_connection:
+                connection.execute("BEGIN IMMEDIATE")
+            updated = connection.execute(
+                """
+                UPDATE video_test_authorizations
+                SET state = 'reserved', reserved_job_id = ?, reserved_at = ?, released_at = NULL
+                WHERE authorization_id = ? AND client_id = ? AND scene_key = ?
+                  AND source_signature = ? AND model = ? AND state = 'available'
+                """,
+                (
+                    job_id, reserved_at, authorization_id, client_id, scene_key,
+                    source_signature, model,
+                ),
+            )
+            if owns_connection:
+                connection.execute("COMMIT")
+            return updated.rowcount == 1
+        finally:
+            if owns_connection:
+                connection.close()
+
+    def consume_controlled_test_authorization(self, job_id: str, consumed_at: float) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE video_test_authorizations
+                SET state = 'consumed', consumed_at = ?
+                WHERE state = 'reserved' AND reserved_job_id = ?
+                """,
+                (consumed_at, job_id),
+            )
+
+    def release_controlled_test_authorization(self, job_id: str, released_at: float) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE video_test_authorizations
+                SET state = 'available', reserved_job_id = NULL, reserved_at = NULL,
+                    released_at = ?
+                WHERE state = 'reserved' AND reserved_job_id = ?
+                """,
+                (released_at, job_id),
+            )
+
     def begin_submission(
         self,
         *,
@@ -376,6 +545,7 @@ class VideoLedger:
         storyboard_bytes: bytes | None = None,
         storyboard_mime_type: str | None = None,
         replacement_for_job_id: str | None = None,
+        controlled_authorization_id: str | None = None,
     ) -> LedgerAdmission:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -414,7 +584,7 @@ class VideoLedger:
                 connection.execute("COMMIT")
                 return LedgerAdmission(False, "active_job", dict(active_existing))
 
-            if replacement_for_job_id is None:
+            if replacement_for_job_id is None and controlled_authorization_id is None:
                 used_global = self._used_count(connection)
                 used_ip = self._used_count(connection, client_ip=client_ip or client_id)
                 if used_global >= self.global_limit:
@@ -426,7 +596,7 @@ class VideoLedger:
                 if kind == "director_cut" and self._used_count(connection, kind=kind) >= self.director_cut_global_limit:
                     connection.execute("COMMIT")
                     return LedgerAdmission(False, "director_cut_global_limit")
-            else:
+            elif replacement_for_job_id:
                 replacement = connection.execute(
                     """
                     SELECT a.*, j.kind AS original_kind, j.status AS original_status,
@@ -459,13 +629,30 @@ class VideoLedger:
                 if reserved.rowcount != 1:
                     connection.execute("COMMIT")
                     return LedgerAdmission(False, "replacement_unavailable")
+            else:
+                reserved = connection.execute(
+                    """
+                    UPDATE video_test_authorizations
+                    SET state = 'reserved', reserved_job_id = ?, reserved_at = ?, released_at = NULL
+                    WHERE authorization_id = ? AND client_id = ? AND scene_key = ?
+                      AND source_signature = ? AND model = ? AND kind = 'first_cut'
+                      AND state = 'available'
+                    """,
+                    (
+                        job_id, created_at, controlled_authorization_id, client_id,
+                        scene_key, source_signature, model or "",
+                    ),
+                )
+                if reserved.rowcount != 1:
+                    connection.execute("COMMIT")
+                    return LedgerAdmission(False, "controlled_authorization_unavailable")
 
             connection.execute(
                 """
                 INSERT INTO video_generation_submissions
                     (job_id, client_id, client_ip, kind, allowance_source,
-                     replacement_for_job_id, state, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+                      replacement_for_job_id, controlled_authorization_id, state, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
                 """,
                 (
                     job_id,
@@ -474,6 +661,7 @@ class VideoLedger:
                     kind,
                     "authorized_replacement" if replacement_for_job_id else "normal",
                     replacement_for_job_id,
+                    controlled_authorization_id,
                     created_at,
                 ),
             )
@@ -537,6 +725,24 @@ class VideoLedger:
                           AND reserved_job_id = ?
                         """,
                         (updated_at, replacement["replacement_for_job_id"], job_id),
+                    )
+                controlled = connection.execute(
+                    """
+                    SELECT controlled_authorization_id
+                    FROM video_generation_submissions
+                    WHERE job_id = ?
+                    """,
+                    (job_id,),
+                ).fetchone()
+                if controlled and controlled["controlled_authorization_id"]:
+                    connection.execute(
+                        """
+                        UPDATE video_test_authorizations
+                        SET state = 'consumed', consumed_at = ?
+                        WHERE authorization_id = ? AND state = 'reserved'
+                          AND reserved_job_id = ?
+                        """,
+                        (updated_at, controlled["controlled_authorization_id"], job_id),
                     )
             connection.execute(
                 """
@@ -607,6 +813,25 @@ class VideoLedger:
                           AND reserved_job_id = ?
                         """,
                         (updated_at, replacement["replacement_for_job_id"], job_id),
+                    )
+                controlled = connection.execute(
+                    """
+                    SELECT controlled_authorization_id
+                    FROM video_generation_submissions
+                    WHERE job_id = ?
+                    """,
+                    (job_id,),
+                ).fetchone()
+                if controlled and controlled["controlled_authorization_id"]:
+                    connection.execute(
+                        """
+                        UPDATE video_test_authorizations
+                        SET state = 'available', reserved_job_id = NULL,
+                            reserved_at = NULL, released_at = ?
+                        WHERE authorization_id = ? AND state = 'reserved'
+                          AND reserved_job_id = ?
+                        """,
+                        (updated_at, controlled["controlled_authorization_id"], job_id),
                     )
             connection.execute(
                 """
@@ -747,6 +972,7 @@ class VideoLedger:
         clauses = [
             "state IN ('pending', 'unknown', 'accepted')",
             "allowance_source = 'normal'",
+            "controlled_authorization_id IS NULL",
         ]
         values: list[str] = []
         if client_id is not None:

@@ -12,6 +12,7 @@ from .schemas import (
     VideoApproval,
     VideoApprovalRequest,
     VideoAllowanceStatus,
+    ControlledAuthorizationStatus,
     VideoFailure,
     VideoJob,
     VideoJobKind,
@@ -84,6 +85,11 @@ class GenerationLimitReached(VideoJobError):
 class ReplacementCreditUnavailable(VideoJobError):
     status_code = 409
     code = "replacement_credit_unavailable"
+
+
+class ControlledAuthorizationUnavailable(VideoJobError):
+    status_code = 409
+    code = "controlled_authorization_unavailable"
 
 
 class ActiveJobExists(VideoJobError):
@@ -259,6 +265,64 @@ class MockVideoJobService:
         snapshot = self.ledger.allowance(client_id, client_ip)
         return VideoAllowanceStatus(**snapshot.__dict__)
 
+    def create_controlled_test_authorization(
+        self,
+        *,
+        client_id: str,
+        scene_key: str,
+        source_signature: str,
+        model: str,
+    ) -> ControlledAuthorizationStatus:
+        provider = self._ensure_provider_available()
+        provider_model = self._validate_provider_model(provider)
+        if provider.name != "vertex" or model != provider_model:
+            raise ControlledAuthorizationUnavailable(
+                "The controlled test authorization is available only for the active Vertex model."
+            )
+        try:
+            authorization = self.ledger.create_controlled_test_authorization(
+                client_id=client_id,
+                scene_key=scene_key,
+                source_signature=source_signature,
+                model=model,
+                authorization_id=f"test-auth-{uuid4().hex}",
+                created_at=self._now(),
+            )
+        except ValueError as exc:
+            raise ControlledAuthorizationUnavailable(str(exc)) from exc
+        return self._controlled_status(authorization)
+
+    def controlled_test_authorization_status(
+        self,
+        *,
+        client_id: str,
+        scene_key: str,
+        source_signature: str,
+        authorization_id: str | None,
+    ) -> ControlledAuthorizationStatus:
+        if not authorization_id or self.provider_name != "vertex":
+            return ControlledAuthorizationStatus()
+        authorization = self.ledger.controlled_test_authorization(
+            authorization_id,
+            client_id=client_id,
+            scene_key=scene_key,
+            source_signature=source_signature,
+            model=effective_veo_model(),
+        )
+        return self._controlled_status(authorization)
+
+    @staticmethod
+    def _controlled_status(authorization) -> ControlledAuthorizationStatus:
+        if authorization is None:
+            return ControlledAuthorizationStatus()
+        return ControlledAuthorizationStatus(
+            authorization_id=authorization.authorization_id,
+            available=authorization.state == "available",
+            scene_key=authorization.scene_key,
+            source_signature=authorization.source_signature,
+            model=authorization.model,
+        )
+
     def request_approval(
         self,
         request: VideoApprovalRequest,
@@ -288,6 +352,23 @@ class MockVideoJobService:
                     )
                 except ValueError as exc:
                     raise ReplacementCreditUnavailable(str(exc)) from exc
+            if request.controlled_authorization_id:
+                if (
+                    request.kind != "first_cut"
+                    or provider.name != "vertex"
+                    or request.replacement_for_job_id
+                    or not self.ledger.controlled_test_authorization(
+                        request.controlled_authorization_id,
+                        client_id=client_id,
+                        scene_key=request.scene_key,
+                        source_signature=request.source_signature,
+                        model=provider_model,
+                        require_available=True,
+                    )
+                ):
+                    raise ControlledAuthorizationUnavailable(
+                        "The controlled authorization is unavailable for this client or scene."
+                    )
             approval_id = f"approval-{uuid4().hex}"
             expires_at = self._now() + self.approval_ttl_seconds
             self._approvals[approval_id] = _ApprovalRecord(
@@ -304,6 +385,7 @@ class MockVideoJobService:
                 approval_id=approval_id,
                 expires_at=expires_at,
                 model=provider_model,
+                controlled_authorization_id=request.controlled_authorization_id,
             )
 
     def register_image(self, image_data_url: str | None, client_id: str) -> str | None:
@@ -356,6 +438,23 @@ class MockVideoJobService:
                 )
             except ValueError as exc:
                 raise ReplacementCreditUnavailable(str(exc)) from exc
+        if request.controlled_authorization_id:
+            if (
+                request.kind != "first_cut"
+                or provider.name != "vertex"
+                or replacement_for_job_id
+                or not self.ledger.controlled_test_authorization(
+                    request.controlled_authorization_id,
+                    client_id=client_id,
+                    scene_key=request.scene_key,
+                    source_signature=request.source_signature,
+                    model=provider_model,
+                    require_available=True,
+                )
+            ):
+                raise ControlledAuthorizationUnavailable(
+                    "The controlled authorization is unavailable for this client or scene."
+                )
         if provider.name == "vertex":
             self._preflight_vertex_provider(provider)
         provider_request = self._provider_request(request, client_id)
@@ -396,12 +495,17 @@ class MockVideoJobService:
                     storyboard_bytes=critique_context["storyboard_bytes"],
                     storyboard_mime_type=critique_context["storyboard_mime_type"],
                     replacement_for_job_id=replacement_for_job_id,
+                    controlled_authorization_id=request.controlled_authorization_id,
                 )
                 if not admission.allowed:
                     if admission.reason == "cached" and admission.existing_job is not None:
                         cached_job = self._job_from_row(admission.existing_job)
                         self._remember_job(cached_job, admission.existing_job)
                         return cached_job.model_copy(update={"deduplicated": True})
+                    if admission.reason == "controlled_authorization_unavailable":
+                        raise ControlledAuthorizationUnavailable(
+                            "The controlled authorization was already reserved or consumed."
+                        )
                     self._raise_ledger_admission(admission.reason)
             else:
                 if self._has_active_job(client_id):

@@ -129,6 +129,9 @@ class MotionPlan(BaseModel):
     movable_characters: list[MotionCandidate] = Field(default_factory=list)
     movable_objects: list[MotionCandidate] = Field(default_factory=list)
     environmental_motion: list[MotionCandidate] = Field(default_factory=list)
+    visible_characters: list["SceneEntity"] = Field(default_factory=list, max_length=12)
+    visible_objects: list["SceneEntity"] = Field(default_factory=list, max_length=16)
+    visible_environment: list["SceneEntity"] = Field(default_factory=list, max_length=12)
     camera_movement: MotionCandidate
     preserved_elements: list[str] = Field(min_length=1, max_length=12)
     prohibited_changes: list[str] = Field(default_factory=list, max_length=16)
@@ -143,6 +146,8 @@ class SceneEntity(BaseModel):
 
     entity_id: str | None = Field(default=None, min_length=1, max_length=64)
     label: str = Field(min_length=1, max_length=80)
+    entity_type: Literal["character", "object", "environment"] | None = None
+    agentive: bool = False
     semantic_category: str | None = Field(default=None, max_length=64)
     action: str | None = Field(
         default=None,
@@ -257,6 +262,10 @@ class SceneAnalysis(BaseModel):
         max_length=8,
     )
     main_character_id: str | None = Field(default=None, min_length=1, max_length=64)
+    main_character_ids: list[Annotated[str, Field(min_length=1, max_length=64)]] = Field(
+        default_factory=list,
+        max_length=12,
+    )
     relationships: list[SceneRelationship] = Field(default_factory=list, max_length=24)
 
 
@@ -373,6 +382,7 @@ class VideoApprovalRequest(BaseModel):
     replacement_for_job_id: str | None = None
     image_handle: str | None = None
     video_critique: VideoCritique | None = None
+    controlled_authorization_id: str | None = Field(default=None, min_length=8, max_length=128)
 
 
 class VideoApproval(BaseModel):
@@ -385,6 +395,7 @@ class VideoApproval(BaseModel):
     approval_id: str
     expires_at: float
     model: str | None = None
+    controlled_authorization_id: str | None = None
 
 
 class VideoJobRequest(VideoApprovalRequest):
@@ -435,6 +446,28 @@ class VideoAllowanceStatus(BaseModel):
     authorized_replacement_used: int
     authorized_replacement_remaining: int
     authorized_replacement_for_job_id: str | None = None
+
+
+class ControlledAuthorizationRequest(BaseModel):
+    scene_key: str = Field(min_length=8, max_length=512)
+    source_signature: str = Field(min_length=8, max_length=1024)
+    model: str = Field(min_length=1, max_length=200)
+    kind: Literal["first_cut"] = "first_cut"
+    image_handle: str | None = None
+
+
+class ControlledAuthorizationStatus(BaseModel):
+    authorization_id: str | None = None
+    available: bool = False
+    kind: Literal["first_cut"] = "first_cut"
+    scene_key: str | None = None
+    source_signature: str | None = None
+    model: str | None = None
+    source: Literal["authorized_test_attempt"] = "authorized_test_attempt"
+    duration_seconds: int = 8
+    aspect_ratio: Literal["16:9"] = "16:9"
+    audio_enabled: bool = False
+    estimate: str | None = None
 
 
 class VideoSceneSnapshot(BaseModel):

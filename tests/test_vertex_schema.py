@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from cinema_agent import vertex
 from cinema_agent.schemas import SceneAnalysis, ShotPlan
+from cinema_agent.scene_analysis import scene_analysis_to_shot_plan
 
 
 def _analysis() -> SceneAnalysis:
@@ -75,6 +76,29 @@ def _analysis() -> SceneAnalysis:
     )
 
 
+def _semantic_entity(
+    entity_id: str,
+    label: str,
+    entity_type: str,
+    *,
+    agentive: bool,
+    action: str | None = None,
+) -> dict:
+    return {
+        "entity_id": entity_id,
+        "label": label,
+        "entity_type": entity_type,
+        "agentive": agentive,
+        "visual_evidence": f"The storyboard visibly contains {label}.",
+        "screenplay_evidence": f"The screenplay references {label}.",
+        "action": action,
+        "grounding_source": "visual_and_screenplay",
+        "confidence": 0.9,
+        "visual_confidence": 0.9,
+        "support": "supported",
+    }
+
+
 class _FakeModels:
     def __init__(self, response_text: str):
         self.response_text = response_text
@@ -103,6 +127,8 @@ def test_compact_analysis_is_strict_and_complete():
     assert set(entity_payload) == {
         "entity_id",
         "label",
+        "entity_type",
+        "agentive",
         "semantic_category",
         "action",
         "visual_evidence",
@@ -270,6 +296,175 @@ def test_validation_diagnostics_do_not_log_raw_model_output(caplog):
     assert raw_marker not in caplog.text
 
 
+@pytest.mark.parametrize(
+    ("case_name", "characters", "objects", "environment", "main_ids"),
+    [
+        (
+            "four-person ensemble",
+            [
+                _semantic_entity("person-1", "person one", "character", agentive=True, action="Look toward the group."),
+                _semantic_entity("person-2", "person two", "character", agentive=True, action="Hold position."),
+                _semantic_entity("person-3", "person three", "character", agentive=True, action="Turn slightly."),
+                _semantic_entity("person-4", "person four", "character", agentive=True, action="Raise a hand."),
+            ],
+            [
+                _semantic_entity("coat", "long coat", "object", agentive=False),
+                _semantic_entity("lantern", "handheld lantern", "object", agentive=False, action="Sway gently."),
+            ],
+            [
+                _semantic_entity("rain", "rain", "environment", agentive=False, action="Fall through the frame."),
+                _semantic_entity("facade", "background facade", "environment", agentive=False),
+            ],
+            ["person-1", "person-2", "person-3", "person-4"],
+        ),
+        (
+            "single animal protagonist",
+            [
+                _semantic_entity("animal", "small animal", "character", agentive=True, action="Look toward the light."),
+            ],
+            [],
+            [_semantic_entity("grass", "grass", "environment", agentive=False)],
+            ["animal"],
+        ),
+        (
+            "robot with tools",
+            [
+                _semantic_entity("robot", "maintenance robot", "character", agentive=True, action="Reach toward the tool."),
+            ],
+            [
+                _semantic_entity("wrench", "wrench", "object", agentive=False, action="Lift slightly."),
+                _semantic_entity("case", "tool case", "object", agentive=False),
+            ],
+            [_semantic_entity("worklight", "work light", "environment", agentive=False, action="Flicker softly.")],
+            ["robot"],
+        ),
+        (
+            "vehicle protagonist",
+            [
+                _semantic_entity("vehicle", "autonomous vehicle", "character", agentive=True, action="Move within the lane."),
+            ],
+            [_semantic_entity("marker", "road marker", "object", agentive=False)],
+            [_semantic_entity("mist", "low mist", "environment", agentive=False, action="Drift across the road.")],
+            ["vehicle"],
+        ),
+        (
+            "landscape without a character",
+            [],
+            [],
+            [
+                _semantic_entity("river", "river", "environment", agentive=False, action="Glint across the surface."),
+                _semantic_entity("cloud", "cloud cover", "environment", agentive=False),
+            ],
+            [],
+        ),
+        (
+            "characters with weather and architecture",
+            [
+                _semantic_entity("traveler-a", "traveler A", "character", agentive=True),
+                _semantic_entity("traveler-b", "traveler B", "character", agentive=True),
+            ],
+            [_semantic_entity("banner", "hanging banner", "object", agentive=False)],
+            [
+                _semantic_entity("weather", "wind", "environment", agentive=False, action="Move through the scene."),
+                _semantic_entity("architecture", "background architecture", "environment", agentive=False),
+            ],
+            ["traveler-a", "traveler-b"],
+        ),
+    ],
+    ids=lambda value: value if isinstance(value, str) else None,
+)
+def test_unrelated_scene_inventories_keep_generic_taxonomy(
+    case_name,
+    characters,
+    objects,
+    environment,
+    main_ids,
+):
+    payload = _analysis().model_dump()
+    payload.update(
+        characters=characters,
+        objects=objects,
+        environment=environment,
+        main_character_id=main_ids[0] if main_ids else None,
+        main_character_ids=main_ids,
+        relationships=[],
+    )
+
+    analysis = vertex._parse_scene_analysis_response(json.dumps(payload))
+
+    assert len(analysis.characters) == len(characters), case_name
+    assert len(analysis.objects) == len(objects), case_name
+    assert len(analysis.environment) == len(environment), case_name
+    assert [entity.entity_id for entity in analysis.characters] == [
+        entity["entity_id"] for entity in characters
+    ]
+    assert all(entity.entity_type == "character" for entity in analysis.characters)
+    assert all(entity.entity_type == "object" for entity in analysis.objects)
+    assert all(entity.entity_type == "environment" for entity in analysis.environment)
+    assert analysis.main_character_ids == main_ids
+
+
+def test_structured_taxonomy_corrects_agentive_and_physical_entities_without_keywords():
+    payload = _analysis().model_dump()
+    payload.update(
+        characters=[],
+        objects=[],
+        environment=[
+            _semantic_entity(
+                "agent",
+                "unusual agent",
+                "environment",
+                agentive=True,
+                action="React within the frame.",
+            ),
+            _semantic_entity(
+                "garment",
+                "distinct garment",
+                "object",
+                agentive=False,
+                action="Shift slightly.",
+            ),
+        ],
+        relationships=[],
+    )
+
+    analysis = vertex._parse_scene_analysis_response(json.dumps(payload))
+
+    assert [entity.entity_id for entity in analysis.characters] == ["agent"]
+    assert [entity.entity_id for entity in analysis.objects] == ["garment"]
+    assert not analysis.environment
+    assert "environment.0:category_corrected_to_characters" in analysis.conflicts
+    assert "environment.1:category_corrected_to_objects" in analysis.conflicts
+
+
+def test_multiple_declared_main_characters_drive_an_ensemble_focal_subject():
+    payload = _analysis().model_dump()
+    payload.update(
+        characters=[
+            _semantic_entity("a", "first subject", "character", agentive=True, action="Turn."),
+            _semantic_entity("b", "second subject", "character", agentive=True, action="Turn."),
+            _semantic_entity("c", "third subject", "character", agentive=True, action="Turn."),
+            _semantic_entity("d", "fourth subject", "character", agentive=True, action="Turn."),
+        ],
+        objects=[],
+        environment=[],
+        main_character_id="a",
+        main_character_ids=["a", "b", "c", "d"],
+        relationships=[],
+    )
+
+    analysis = vertex._parse_scene_analysis_response(json.dumps(payload))
+    plan = scene_analysis_to_shot_plan(analysis, "The group turns together.", "focused")
+
+    assert plan.focal_subject == "first subject, second subject, third subject, fourth subject"
+    assert [entity.entity_id for entity in plan.motion_plan.visible_characters] == [
+        "a",
+        "b",
+        "c",
+        "d",
+    ]
+
+
 def test_director_prompt_separates_manipulated_objects_from_environment():
     prompt = vertex.DIRECTOR_PROMPT
 
@@ -316,13 +511,43 @@ def test_direct_planner_uses_compact_analysis_and_json_mode(monkeypatch):
     assert "main_character_id" in vertex.DIRECTOR_PROMPT
     assert "not size, centrality, or human appearance" in vertex.DIRECTOR_PROMPT
     assert "Do not repeat the" in vertex.DIRECTOR_PROMPT
+    assert "mood is one short sentence" in vertex.DIRECTOR_PROMPT
+    assert "scene_summary is at most two short sentences" in vertex.DIRECTOR_PROMPT
+    assert "visual_evidence is one concise sentence or null" in vertex.DIRECTOR_PROMPT
+    assert "Preserve every clearly visible, motion-relevant entity" in vertex.DIRECTOR_PROMPT
     assert config.response_mime_type == "application/json"
-    assert vertex.DIRECTOR_OUTPUT_TOKEN_BUDGET == 8192
-    assert config.max_output_tokens == 8192
+    assert vertex.DIRECTOR_OUTPUT_TOKEN_BUDGET == 16384
+    assert config.max_output_tokens == 16384
+    assert config.thinking_config.thinking_budget == 0
     assert config.response_schema is None
     assert config.response_json_schema is None
     assert "response_schema" not in config.model_fields_set
     assert "response_json_schema" not in config.model_fields_set
+
+
+def test_director_output_budget_accepts_safe_environment_override(monkeypatch):
+    models = _FakeModels(_analysis().model_dump_json())
+    monkeypatch.setenv(vertex.DIRECTOR_OUTPUT_TOKEN_BUDGET_ENV, "12000")
+    monkeypatch.setattr(vertex, "_client", lambda: _FakeClient(models))
+
+    vertex.generate_shot_plan("A courier waits.", "focused", None)
+
+    config = models.calls[0]["config"]
+    assert config.max_output_tokens == 12000
+
+
+@pytest.mark.parametrize("configured", ["not-a-number", "0", "70000"])
+def test_director_output_budget_rejects_unsafe_environment_override(
+    monkeypatch, configured
+):
+    models = _FakeModels(_analysis().model_dump_json())
+    monkeypatch.setenv(vertex.DIRECTOR_OUTPUT_TOKEN_BUDGET_ENV, configured)
+    monkeypatch.setattr(vertex, "_client", lambda: _FakeClient(models))
+
+    vertex.generate_shot_plan("A courier waits.", "focused", None)
+
+    config = models.calls[0]["config"]
+    assert config.max_output_tokens == vertex.DIRECTOR_OUTPUT_TOKEN_BUDGET
 
 
 def test_compact_prompt_includes_creative_intent_once_not_per_entity(monkeypatch):
@@ -406,11 +631,12 @@ def test_direct_planner_rejects_empty_truncated_or_surrounding_prose(
 ):
     sentinel = "SCREENPLAY_SENTINEL_MUST_NOT_BE_LOGGED"
     response_text = response_text.replace("truncated", sentinel)
-    _run_with_response(monkeypatch, response_text)
+    models = _run_with_response(monkeypatch, response_text)
 
     with pytest.raises((ValidationError, ValueError)):
         vertex.generate_shot_plan(sentinel, "focused", None)
 
+    assert len(models.calls) == 1
     diagnostics = caplog.text
     assert "candidate_count=" in diagnostics
     assert "response_text_length=" in diagnostics
@@ -418,6 +644,7 @@ def test_direct_planner_rejects_empty_truncated_or_surrounding_prose(
     assert "ends_with_brace=" in diagnostics
     assert "markdown_fences_present=" in diagnostics
     assert "empty_response=" in diagnostics
+    assert "max_output_tokens=16384" in diagnostics
     assert sentinel not in diagnostics
 
 

@@ -50,3 +50,15 @@ The compact provider envelope stays strict at the top level, while its semantic 
 **Why:** Relaxing the whole envelope can hide provider contract drift, but strict whole-entity validation caused one malformed optional field to erase otherwise valid object recognition and trigger deterministic fallback.
 
 **How to apply:** Keep unknown top-level fields invalid; sanitize known optional lists and entity fields independently, preserve valid labels/categories, and classify only the explicit no-recoverable-entities condition as local validation fallback.
+
+The provider contract now includes explicit `entity_type` and `agentive` flags. The parser may correct a
+conflicting array placement from those structured flags, recording a value-free conflict, before validating
+relationships; it must not use scene-specific noun lists to make that correction.
+
+**Why:** Generic storyboards can contain agentive vehicles, animals, robots, ensembles, or animated objects,
+and physical props can otherwise be mislabeled as environmental motion. Structured correction preserves the
+visible inventory without encoding one scene's vocabulary.
+
+**How to apply:** Let `agentive=true` resolve to characters and explicit object/environment types resolve to
+their matching categories. Preserve all entity IDs, validate relationships after correction, and keep plural
+main-character IDs for co-equal subjects.

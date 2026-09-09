@@ -15,6 +15,8 @@ from cinema_agent.router import route_scene_action
 from cinema_agent.rate_limit import VertexRateLimiter
 from cinema_agent.schemas import DirectRequest, DirectResponse
 from cinema_agent.schemas import (
+    ControlledAuthorizationRequest,
+    ControlledAuthorizationStatus,
     VideoAllowanceStatus,
     VideoApproval,
     VideoApprovalRequest,
@@ -221,6 +223,43 @@ def video_allowance(http_request: Request):
     return video_job_service.allowance_status(
         _session_id(http_request),
         _request_ip(http_request),
+    )
+
+
+@app.post(
+    "/api/video-test-authorization",
+    response_model=ControlledAuthorizationStatus,
+)
+def create_video_test_authorization(
+    request: ControlledAuthorizationRequest,
+    http_request: Request,
+):
+    try:
+        return video_job_service.create_controlled_test_authorization(
+            client_id=_session_id(http_request),
+            scene_key=request.scene_key,
+            source_signature=request.source_signature,
+            model=request.model,
+        )
+    except VideoJobError as error:
+        raise _video_error(error) from error
+
+
+@app.get(
+    "/api/video-test-authorization",
+    response_model=ControlledAuthorizationStatus,
+)
+def video_test_authorization(
+    scene_key: str,
+    source_signature: str,
+    authorization_id: str | None = None,
+    http_request: Request = None,
+):
+    return video_job_service.controlled_test_authorization_status(
+        client_id=_session_id(http_request),
+        scene_key=scene_key,
+        source_signature=source_signature,
+        authorization_id=authorization_id,
     )
 
 

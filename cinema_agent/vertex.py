@@ -24,7 +24,10 @@ from .router import route_scene_action
 
 
 GOOGLE_CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
-DIRECTOR_OUTPUT_TOKEN_BUDGET = 8192
+DIRECTOR_OUTPUT_TOKEN_BUDGET = 16384
+DIRECTOR_OUTPUT_TOKEN_BUDGET_ENV = "GEMINI_DIRECTOR_OUTPUT_TOKEN_BUDGET"
+_MIN_DIRECTOR_OUTPUT_TOKEN_BUDGET = 1024
+_MAX_DIRECTOR_OUTPUT_TOKEN_BUDGET = 65536
 logger = logging.getLogger(__name__)
 
 
@@ -32,10 +35,12 @@ DIRECTOR_PROMPT = """You are FramePilot's multimodal scene analyst. Analyze the 
 intent, and optional storyboard image. Return exactly one compact JSON object with:
 scene_summary:string; mood:string; characters:SceneEntity[]; objects:SceneEntity[];
 environment:SceneEntity[]; camera:CameraAnalysis; preserve:string[]; prohibit:string[];
-conflicts:string[]; main_character_id:string|null; relationships:SceneRelationship[].
+conflicts:string[]; main_character_id:string|null; main_character_ids:string[];
+relationships:SceneRelationship[].
 
 SceneEntity records contain only:
-{"entity_id":string|null,"label":string,"semantic_category":string|null,
+{"entity_id":string|null,"label":string,"entity_type":"character"|"object"|"environment",
+"agentive":boolean,"semantic_category":string|null,
 "action":string|null,"visual_evidence":string|null,
 "screenplay_evidence":string|null,"grounding_source":
 "visual"|"screenplay"|"visual_and_screenplay"|"unsupported"|null,
@@ -51,23 +56,37 @@ SceneRelationship records contain only:
 The relationship action must be one concise JSON string or null; never an object, array, or nested
 record.
 
-Compactness rules: use short source-local evidence excerpts, not explanations. Do not repeat the
-creative intent or preservation/prohibition rules inside entities. Put shared preservation and
-prohibition rules once in preserve and prohibit. Use concise actions and relationship actions.
-Keep scene_summary under 400 characters; use at most 12 characters, 16 objects, 12 environment
-elements, 24 relationships, 12 preserve rules, 16 prohibit rules, and 8 conflicts. Keep labels
-under 80 characters, IDs under 64, categories under 64, actions and evidence under 240. When
-limits compete, prioritize the most narratively and visually important entities and relationships.
+Compactness rules: mood is one short sentence; scene_summary is at most two short sentences; labels
+are short noun phrases; visual_evidence is one concise sentence or null; screenplay_evidence is one
+concise sentence or null; action is one concise sentence or null; and relationship action is one
+concise sentence or null. Use short source-local evidence excerpts, not explanations. Do not repeat
+the same evidence in multiple fields. Do not repeat the creative intent or preservation/prohibition
+rules inside entities. Put shared preservation and prohibition rules once in preserve and prohibit.
+Avoid explanatory prose outside the JSON object. Keep scene_summary under 400 characters; use at most
+12 characters, 16 objects, 12 environment elements, 24 relationships, 12 preserve rules, 16 prohibit
+rules, and 8 conflicts. Keep labels under 80 characters, IDs under 64, categories under 64, actions
+and evidence under 240. Preserve every clearly visible, motion-relevant entity and camera opportunity;
+when limits compete, prioritize distinct entity coverage and motion-planning relationships over verbose
+descriptions.
 
-A character is a narratively agentive entity, not necessarily human or living. The main character is
-the visible entity functioning as the scene's principal subject, actor, or point of attention. It may
-be any person, animal, creature, robot, vehicle, machine, animated object, natural entity, or
-abstract/stylized figure. Determine it from composition, screenplay focus, actions, relationships,
-and creative intent—not size, centrality, or human appearance. Return at most one
-main_character_id, and only when it references an entity_id in characters. Supporting characters
-may also be returned. An ordinary non-agentive item is an object unless the scene presents it as
-acting, choosing, reacting, or functioning as the narrative subject. Do not use fixed character
-types or production-scene labels. Do not return one entity in both characters and objects.
+A character is a narratively agentive entity, not necessarily human or living. Set entity_type to
+character and agentive to true for any visible agentive or living subject, including a person, animal,
+creature, robot, vehicle, plant, animated object, or abstract/stylized figure. A visible group must
+remain a set of individual entities; never place people in environment. The main-character decision
+comes from visual prominence, composition, agency, screenplay role, actions, and relationships —
+not size, centrality, or human appearance, and not from whether the subject is human. Return
+main_character_ids for all co-equal main characters and
+keep main_character_id as the first ID for compatibility. Every main ID must reference an entity_id
+in characters. An ordinary non-agentive physical item is an object unless the scene presents it as
+acting, choosing, reacting, or functioning as the narrative subject.
+
+Set entity_type to object and agentive to false for a visible non-agentive physical item, prop,
+garment, accessory, toy, book, tool, furniture item, or structure that can be independently
+referenced or moved. Set entity_type to environment and agentive to false only for surrounding
+atmosphere, weather, lighting, terrain, vegetation, water, particles, background architecture, or
+ambient effects. A physical item must not be classified as environmental motion. Do not use fixed
+character types, production-scene labels, or scene-specific noun rules. Do not return one entity in
+more than one category.
 
 Use stable noun-phrase labels. Preserve distinct controllable entities and use relationships for
 causal actions, affected entities, attached/held/worn objects, components, and environmental
@@ -164,14 +183,38 @@ def _finish_reason(response) -> str:
     return "unknown"
 
 
-def _log_response_diagnostics(response, text: str) -> None:
+def _effective_director_output_token_budget() -> int:
+    configured = os.getenv(DIRECTOR_OUTPUT_TOKEN_BUDGET_ENV)
+    if configured is None:
+        return DIRECTOR_OUTPUT_TOKEN_BUDGET
+    try:
+        value = int(configured.strip())
+    except (AttributeError, TypeError, ValueError):
+        return DIRECTOR_OUTPUT_TOKEN_BUDGET
+    if not _MIN_DIRECTOR_OUTPUT_TOKEN_BUDGET <= value <= _MAX_DIRECTOR_OUTPUT_TOKEN_BUDGET:
+        return DIRECTOR_OUTPUT_TOKEN_BUDGET
+    return value
+
+
+def _log_response_diagnostics(
+    response,
+    text: str,
+    *,
+    output_token_budget: int | None = None,
+) -> None:
     trimmed = text.strip()
     candidates = getattr(response, "candidates", None)
     candidate_count = len(candidates) if isinstance(candidates, (list, tuple)) else 0
+    effective_budget = (
+        output_token_budget
+        if isinstance(output_token_budget, int)
+        else _effective_director_output_token_budget()
+    )
     logger.warning(
         "Vertex scene analysis response diagnostics: candidate_count=%d "
         "finish_reason=%s response_text_length=%d starts_with_brace=%s "
-        "ends_with_brace=%s markdown_fences_present=%s empty_response=%s",
+        "ends_with_brace=%s markdown_fences_present=%s empty_response=%s "
+        "max_output_tokens=%d",
         candidate_count,
         _finish_reason(response),
         len(text),
@@ -179,6 +222,7 @@ def _log_response_diagnostics(response, text: str) -> None:
         trimmed.endswith("}"),
         "```" in trimmed,
         not bool(trimmed),
+        effective_budget,
     )
 
 
@@ -383,7 +427,12 @@ def _sanitize_camera_analysis(value) -> tuple[dict, list[str]]:
         return fallback, [*issues, "camera:validation_error"]
 
 
-def _sanitize_scene_entity(value, *, path: str) -> tuple[dict | None, list[str]]:
+def _sanitize_scene_entity(
+    value,
+    *,
+    path: str,
+    category: str | None = None,
+) -> tuple[dict | None, list[str]]:
     """Recover an entity label without allowing malformed evidence to erase it."""
     if not isinstance(value, dict):
         return None, [f"{path}:{'null' if value is None else 'object_type'}"]
@@ -392,6 +441,10 @@ def _sanitize_scene_entity(value, *, path: str) -> tuple[dict | None, list[str]]
     allowed_fields = {
         "entity_id",
         "label",
+        "entity_type",
+        "type",
+        "agentive",
+        "is_agentive",
         "semantic_category",
         "action",
         "suggested_motion",
@@ -427,7 +480,17 @@ def _sanitize_scene_entity(value, *, path: str) -> tuple[dict | None, list[str]]
     if not label:
         return None, [*issues, f"{path}.label:empty"]
 
-    recovered = {"label": label}
+    entity_type = value.get("entity_type", value.get("type"))
+    if entity_type not in {"character", "object", "environment", None}:
+        issues.append(f"{path}.entity_type:literal_error")
+        entity_type = None
+    recovered = {"label": label, "entity_type": entity_type or category}
+
+    agentive = value.get("agentive", value.get("is_agentive", False))
+    if not isinstance(agentive, bool):
+        issues.append(f"{path}.agentive:bool_type")
+        agentive = False
+    recovered["agentive"] = agentive
     for field in (
         "semantic_category",
         "action",
@@ -560,6 +623,48 @@ def _sanitize_scene_entity(value, *, path: str) -> tuple[dict | None, list[str]]
         return None, [*issues, *_safe_validation_conflicts(path, error)]
 
 
+def _normalize_entity_categories(
+    categories: dict[str, list[dict]],
+) -> tuple[dict[str, list[dict]], list[str]]:
+    """Resolve explicit structured taxonomy flags without scene-specific heuristics."""
+    category_names = ("characters", "objects", "environment")
+    category_for_type = {
+        "character": "characters",
+        "object": "objects",
+        "environment": "environment",
+    }
+    limits = {"characters": 12, "objects": 16, "environment": 12}
+    normalized = {category: [] for category in category_names}
+    issues: list[str] = []
+    seen_ids: set[str] = set()
+
+    for source_category in category_names:
+        for index, entity in enumerate(categories.get(source_category, [])):
+            target_category = category_for_type.get(
+                entity.get("entity_type"),
+                source_category,
+            )
+            if entity.get("agentive") is True:
+                target_category = "characters"
+            entity = {**entity, "entity_type": target_category.rstrip("s")}
+            if target_category != source_category:
+                issues.append(
+                    f"{source_category}.{index}:category_corrected_to_{target_category}"
+                )
+
+            entity_id = entity.get("entity_id")
+            if entity_id and entity_id in seen_ids:
+                issues.append(f"{source_category}.{index}.entity_id:duplicate")
+            elif entity_id:
+                seen_ids.add(entity_id)
+
+            if len(normalized[target_category]) >= limits[target_category]:
+                issues.append(f"{source_category}.{index}:target_category_full")
+                continue
+            normalized[target_category].append(entity)
+    return normalized, issues
+
+
 def _sanitize_scene_analysis_payload(payload: dict) -> dict:
     allowed_fields = {
         "scene_summary",
@@ -572,6 +677,7 @@ def _sanitize_scene_analysis_payload(payload: dict) -> dict:
         "prohibit",
         "conflicts",
         "main_character_id",
+        "main_character_ids",
         "relationships",
     }
     sanitized = dict(payload)
@@ -627,6 +733,50 @@ def _sanitize_scene_analysis_payload(payload: dict) -> dict:
             else:
                 sanitized["main_character_id"] = normalized_id
 
+    raw_main_character_ids = sanitized.get("main_character_ids", [])
+    main_character_ids: list[str] = []
+    if raw_main_character_ids is None:
+        diagnostics.append("main_character_ids:null")
+    elif not isinstance(raw_main_character_ids, list):
+        diagnostics.append("main_character_ids:list_type")
+    else:
+        for index, value in enumerate(raw_main_character_ids):
+            if not isinstance(value, str):
+                diagnostics.append(f"main_character_ids.{index}:string_type")
+                continue
+            normalized_id = value.strip()
+            if not normalized_id:
+                diagnostics.append(f"main_character_ids.{index}:empty")
+                continue
+            if len(normalized_id) > _declared_max_length(
+                SceneAnalysis,
+                "main_character_ids",
+                item=True,
+            ):
+                diagnostics.append(f"main_character_ids.{index}:string_too_long")
+                continue
+            if normalized_id in main_character_ids:
+                diagnostics.append(f"main_character_ids.{index}:duplicate")
+                continue
+            main_character_ids.append(normalized_id)
+    if len(main_character_ids) > _declared_max_length(SceneAnalysis, "main_character_ids"):
+        diagnostics.append("main_character_ids:too_many")
+        main_character_ids = main_character_ids[
+            : _declared_max_length(SceneAnalysis, "main_character_ids")
+        ]
+
+    singular_main_character_id = sanitized.get("main_character_id")
+    if main_character_ids:
+        if (
+            singular_main_character_id
+            and singular_main_character_id not in main_character_ids
+        ):
+            diagnostics.append("main_character_id:not_in_main_character_ids")
+        sanitized["main_character_id"] = main_character_ids[0]
+    elif singular_main_character_id:
+        main_character_ids = [singular_main_character_id]
+    sanitized["main_character_ids"] = main_character_ids
+
     conflicts, conflict_issues = _sanitize_bounded_string_list(
         sanitized.get("conflicts", []),
         path="conflicts",
@@ -673,6 +823,7 @@ def _sanitize_scene_analysis_payload(payload: dict) -> dict:
             recovered_entity, entity_issues = _sanitize_scene_entity(
                 entry,
                 path=f"{category}.{index}",
+                category=category.rstrip("s"),
             )
             diagnostics.extend(entity_issues)
             if recovered_entity is None:
@@ -683,6 +834,21 @@ def _sanitize_scene_analysis_payload(payload: dict) -> dict:
             if recovered_entity.get("entity_id"):
                 retained_ids.add(recovered_entity["entity_id"])
         sanitized[category] = retained_entities
+
+    normalized_categories, category_issues = _normalize_entity_categories(
+        {
+            category: sanitized.get(category, [])
+            for category in ("characters", "objects", "environment")
+        }
+    )
+    diagnostics.extend(category_issues)
+    sanitized.update(normalized_categories)
+    retained_ids = {
+        entity["entity_id"]
+        for category in normalized_categories.values()
+        for entity in category
+        if entity.get("entity_id")
+    }
 
     relationship_entries = sanitized.get("relationships", [])
     if isinstance(relationship_entries, list):
@@ -749,6 +915,7 @@ def _parse_scene_analysis_response(text: str) -> SceneAnalysis:
 
 def generate_shot_plan(screenplay: str, mood: str, image_data_url: str | None) -> ShotPlan:
     routing = route_scene_action(screenplay, mood)
+    output_token_budget = _effective_director_output_token_budget()
     user_prompt = (
         f"CREATIVE INTENT: {mood}\n\nSCREENPLAY:\n{screenplay}\n\n"
         "SEMANTIC ACTION ROUTING:\n"
@@ -773,15 +940,20 @@ def generate_shot_plan(screenplay: str, mood: str, image_data_url: str | None) -
             config=types.GenerateContentConfig(
                 system_instruction=DIRECTOR_PROMPT,
                 response_mime_type="application/json",
-                max_output_tokens=DIRECTOR_OUTPUT_TOKEN_BUDGET,
+                max_output_tokens=output_token_budget,
                 temperature=0.55,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
             ),
         )
     response_text = _response_text(response)
     try:
         analysis = _parse_scene_analysis_response(response_text)
     except (ValidationError, ValueError, TypeError):
-        _log_response_diagnostics(response, response_text)
+        _log_response_diagnostics(
+            response,
+            response_text,
+            output_token_budget=output_token_budget,
+        )
         raise
     return scene_analysis_to_shot_plan(analysis, screenplay, mood)
 
