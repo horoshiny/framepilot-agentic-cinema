@@ -33,9 +33,9 @@ class AllowanceSnapshot:
 @dataclass(frozen=True)
 class ControlledAuthorization:
     authorization_id: str
-    client_id: str
-    scene_key: str
-    source_signature: str
+    client_id: str | None
+    scene_key: str | None
+    source_signature: str | None
     kind: str
     model: str
     source: str
@@ -136,15 +136,15 @@ class VideoLedger:
                 );
                 CREATE TABLE IF NOT EXISTS video_test_authorizations (
                     authorization_id TEXT PRIMARY KEY,
-                    client_id TEXT NOT NULL,
-                    scene_key TEXT NOT NULL,
-                    source_signature TEXT NOT NULL,
+                    client_id TEXT,
+                    scene_key TEXT,
+                    source_signature TEXT,
                     kind TEXT NOT NULL CHECK (kind = 'first_cut'),
                     model TEXT NOT NULL,
                     authorization_source TEXT NOT NULL
                         CHECK (authorization_source = 'authorized_test_attempt'),
                     state TEXT NOT NULL DEFAULT 'available'
-                        CHECK (state IN ('available', 'reserved', 'consumed')),
+                        CHECK (state IN ('pending', 'available', 'reserved', 'consumed')),
                     created_at REAL NOT NULL,
                     reserved_job_id TEXT,
                     reserved_at REAL,
@@ -152,6 +152,21 @@ class VideoLedger:
                     released_at REAL,
                     revoked_at REAL,
                     revocation_reason TEXT
+                );
+                CREATE TABLE IF NOT EXISTS durable_direct_contexts (
+                    client_id TEXT PRIMARY KEY,
+                    scene_key TEXT NOT NULL,
+                    source_signature TEXT NOT NULL,
+                    image_handle TEXT,
+                    storyboard_bytes BLOB,
+                    storyboard_mime_type TEXT,
+                    screenplay TEXT NOT NULL,
+                    creative_intent TEXT NOT NULL,
+                    direction_response_json TEXT NOT NULL,
+                    analysis_source TEXT NOT NULL,
+                    eligibility_json TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_video_replacement_client
                     ON video_replacement_authorizations(client_id, state);
@@ -183,21 +198,25 @@ class VideoLedger:
                 "SELECT sql FROM sqlite_master "
                 "WHERE type = 'table' AND name = 'video_test_authorizations'"
             ).fetchone()[0]
-            if "revoked_wrong_scene" not in authorization_sql:
+            if (
+                "revoked_wrong_scene" not in authorization_sql
+                or "pending" not in authorization_sql
+                or "client_id TEXT NOT NULL" in authorization_sql
+            ):
                 connection.execute("DROP INDEX IF EXISTS idx_video_test_authorization_singleton")
                 connection.execute(
                     """
                     CREATE TABLE video_test_authorizations_new (
                         authorization_id TEXT PRIMARY KEY,
-                        client_id TEXT NOT NULL,
-                        scene_key TEXT NOT NULL,
-                        source_signature TEXT NOT NULL,
+                        client_id TEXT,
+                        scene_key TEXT,
+                        source_signature TEXT,
                         kind TEXT NOT NULL CHECK (kind = 'first_cut'),
                         model TEXT NOT NULL,
                         authorization_source TEXT NOT NULL
                             CHECK (authorization_source = 'authorized_test_attempt'),
                         state TEXT NOT NULL DEFAULT 'available'
-                            CHECK (state IN ('available', 'reserved', 'consumed', 'revoked_wrong_scene')),
+                            CHECK (state IN ('pending', 'available', 'reserved', 'consumed', 'revoked_wrong_scene')),
                         created_at REAL NOT NULL,
                         reserved_job_id TEXT,
                         reserved_at REAL,
@@ -577,6 +596,141 @@ class VideoLedger:
             ).fetchone()
             return self._controlled_authorization_from_row(row)
 
+    def create_pending_controlled_test_authorization(
+        self,
+        *,
+        authorization_id: str,
+        model: str,
+        created_at: float,
+    ) -> ControlledAuthorization:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                """
+                SELECT * FROM video_test_authorizations
+                WHERE authorization_source = 'authorized_test_attempt'
+                  AND state = 'pending'
+                ORDER BY created_at ASC
+                LIMIT 1
+                """
+            ).fetchone()
+            if existing:
+                connection.execute("COMMIT")
+                return self._controlled_authorization_from_row(existing)
+            connection.execute(
+                """
+                INSERT INTO video_test_authorizations
+                    (authorization_id, client_id, scene_key, source_signature, kind, model,
+                     authorization_source, state, created_at)
+                VALUES (?, NULL, NULL, NULL, 'first_cut', ?,
+                        'authorized_test_attempt', 'pending', ?)
+                """,
+                (authorization_id, model, created_at),
+            )
+            connection.execute("COMMIT")
+            row = connection.execute(
+                "SELECT * FROM video_test_authorizations WHERE authorization_id = ?",
+                (authorization_id,),
+            ).fetchone()
+            return self._controlled_authorization_from_row(row)
+
+    def save_direct_context(
+        self,
+        *,
+        client_id: str,
+        scene_key: str,
+        source_signature: str,
+        image_handle: str | None,
+        storyboard_bytes: bytes | None,
+        storyboard_mime_type: str | None,
+        screenplay: str,
+        creative_intent: str,
+        direction_response: dict[str, Any],
+        analysis_source: str,
+        eligibility: dict[str, Any],
+        created_at: float,
+        updated_at: float,
+    ) -> None:
+        with self._connect() as connection:
+            existing = connection.execute(
+                "SELECT created_at FROM durable_direct_contexts WHERE client_id = ?",
+                (client_id,),
+            ).fetchone()
+            original_created_at = existing["created_at"] if existing else created_at
+            connection.execute(
+                """
+                INSERT INTO durable_direct_contexts
+                    (client_id, scene_key, source_signature, image_handle, storyboard_bytes,
+                     storyboard_mime_type, screenplay, creative_intent,
+                     direction_response_json, analysis_source, eligibility_json,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(client_id) DO UPDATE SET
+                    scene_key = excluded.scene_key,
+                    source_signature = excluded.source_signature,
+                    image_handle = excluded.image_handle,
+                    storyboard_bytes = excluded.storyboard_bytes,
+                    storyboard_mime_type = excluded.storyboard_mime_type,
+                    screenplay = excluded.screenplay,
+                    creative_intent = excluded.creative_intent,
+                    direction_response_json = excluded.direction_response_json,
+                    analysis_source = excluded.analysis_source,
+                    eligibility_json = excluded.eligibility_json,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    client_id,
+                    scene_key,
+                    source_signature,
+                    image_handle,
+                    storyboard_bytes,
+                    storyboard_mime_type,
+                    screenplay,
+                    creative_intent,
+                    json.dumps(direction_response, ensure_ascii=False, separators=(",", ":")),
+                    analysis_source,
+                    json.dumps(eligibility, ensure_ascii=False, separators=(",", ":")),
+                    original_created_at,
+                    updated_at,
+                ),
+            )
+
+    def direct_context(self, client_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM durable_direct_contexts WHERE client_id = ?",
+                (client_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return self._direct_context_from_row(row)
+
+    def all_direct_contexts(self) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM durable_direct_contexts"
+            ).fetchall()
+        return [self._direct_context_from_row(row) for row in rows]
+
+    @staticmethod
+    def _direct_context_from_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "client_id": row["client_id"],
+            "scene_key": row["scene_key"],
+            "source_signature": row["source_signature"],
+            "image_handle": row["image_handle"],
+            "storyboard_bytes": row["storyboard_bytes"],
+            "storyboard_mime_type": row["storyboard_mime_type"],
+            "screenplay": row["screenplay"],
+            "creative_intent": row["creative_intent"],
+            "direction_response": json.loads(row["direction_response_json"]),
+            "analysis_source": row["analysis_source"],
+            "eligibility": json.loads(row["eligibility_json"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
     def revoke_controlled_test_authorization(
         self,
         authorization_id: str,
@@ -678,26 +832,35 @@ class VideoLedger:
                 else:
                     connection.execute("COMMIT")
                     return self._controlled_authorization_from_row(active)
+            pending = connection.execute(
+                """
+                SELECT * FROM video_test_authorizations
+                WHERE authorization_source = 'authorized_test_attempt'
+                  AND state = 'pending'
+                ORDER BY created_at ASC
+                LIMIT 1
+                """
+            ).fetchone()
+            if not pending or pending["model"] != model:
+                connection.execute("ROLLBACK")
+                raise ValueError("No pending controlled authorization is available.")
             connection.execute(
                 """
-                INSERT INTO video_test_authorizations
-                    (authorization_id, client_id, scene_key, source_signature, kind, model,
-                     authorization_source, state, created_at)
-                VALUES (?, ?, ?, ?, 'first_cut', ?, 'authorized_test_attempt', 'available', ?)
+                UPDATE video_test_authorizations
+                SET client_id = ?, scene_key = ?, source_signature = ?, state = 'available'
+                WHERE authorization_id = ? AND state = 'pending'
                 """,
                 (
-                    authorization_id,
                     client_id,
                     scene_key,
                     source_signature,
-                    model,
-                    activated_at,
+                    pending["authorization_id"],
                 ),
             )
             connection.execute("COMMIT")
             row = connection.execute(
                 "SELECT * FROM video_test_authorizations WHERE authorization_id = ?",
-                (authorization_id,),
+                (pending["authorization_id"],),
             ).fetchone()
             return self._controlled_authorization_from_row(row)
 
@@ -723,6 +886,19 @@ class VideoLedger:
         if not row or (require_available and row["state"] != "available"):
             return None
         return self._controlled_authorization_from_row(row)
+
+    def pending_controlled_test_authorization(self) -> ControlledAuthorization | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM video_test_authorizations
+                WHERE authorization_source = 'authorized_test_attempt'
+                  AND state = 'pending'
+                ORDER BY created_at ASC
+                LIMIT 1
+                """
+            ).fetchone()
+        return self._controlled_authorization_from_row(row) if row else None
 
     def reserve_controlled_test_authorization(
         self,

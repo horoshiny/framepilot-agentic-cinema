@@ -473,10 +473,27 @@ class ControlledAuthorizationStatus(BaseModel):
     source_signature: str | None = None
     model: str | None = None
     source: Literal["authorized_test_attempt"] = "authorized_test_attempt"
+    state: Literal[
+        "pending",
+        "available",
+        "reserved",
+        "consumed",
+        "revoked_wrong_scene",
+    ] | None = None
     duration_seconds: int = 8
     aspect_ratio: Literal["16:9"] = "16:9"
     audio_enabled: bool = False
     estimate: str | None = None
+
+
+class DirectRecoveryResponse(BaseModel):
+    scene_key: str
+    source_signature: str
+    screenplay: str
+    creative_intent: str
+    direction_response: DirectResponse
+    created_at: float
+    updated_at: float
 
 
 class VideoSceneSnapshot(BaseModel):

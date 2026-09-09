@@ -253,6 +253,7 @@ class MockVideoJobService:
             per_ip_limit=self.real_per_ip_limit,
             director_cut_global_limit=self.real_director_global_limit,
         )
+        self._restore_durable_direct_context()
         self._restore_durable_jobs()
 
     @property
@@ -294,6 +295,23 @@ class MockVideoJobService:
             raise ControlledAuthorizationUnavailable(str(exc)) from exc
         return self._controlled_status(authorization)
 
+    def create_pending_controlled_test_authorization(
+        self,
+        *,
+        authorization_id: str,
+        model: str,
+    ) -> ControlledAuthorizationStatus:
+        try:
+            model = validate_veo_model(model)
+            authorization = self.ledger.create_pending_controlled_test_authorization(
+                authorization_id=authorization_id,
+                model=model,
+                created_at=self._now(),
+            )
+        except (ProviderError, ValueError) as exc:
+            raise ControlledAuthorizationUnavailable(str(exc)) from exc
+        return self._controlled_status(authorization)
+
     def remember_direct_context(
         self,
         *,
@@ -302,14 +320,39 @@ class MockVideoJobService:
         source_signature: str,
         analysis_source: str,
         image_handle: str | None,
+        screenplay: str = "Test Direct context",
+        creative_intent: str = "cinematic",
+        direction_response: dict | None = None,
+        eligibility: dict | None = None,
     ) -> None:
         with self._lock:
+            image = self._images.get(image_handle) if image_handle else None
+            now = self._now()
             self._direct_contexts[client_id] = {
                 "scene_key": scene_key,
                 "source_signature": source_signature,
                 "analysis_source": analysis_source,
                 "image_handle": image_handle,
+                "screenplay": screenplay,
+                "creative_intent": creative_intent,
+                "direction_response": direction_response or {},
+                "eligibility": eligibility or {},
             }
+            self.ledger.save_direct_context(
+                client_id=client_id,
+                scene_key=scene_key,
+                source_signature=source_signature,
+                image_handle=image_handle,
+                storyboard_bytes=image.image_bytes if image else None,
+                storyboard_mime_type=image.mime_type if image else None,
+                screenplay=screenplay,
+                creative_intent=creative_intent,
+                direction_response=direction_response or {},
+                analysis_source=analysis_source,
+                eligibility=eligibility or {},
+                created_at=now,
+                updated_at=now,
+            )
 
     def activate_controlled_test_authorization(
         self,
@@ -341,6 +384,7 @@ class MockVideoJobService:
                 or context["source_signature"] != request.source_signature
                 or context["analysis_source"] != "vertex_multimodal"
                 or context["image_handle"] != request.image_handle
+                or not context.get("eligibility", {}).get("controlled_test_eligible")
             ):
                 raise ControlledAuthorizationUnavailable(
                     "The requested scene is not the current Direct analysis for this session."
@@ -382,6 +426,10 @@ class MockVideoJobService:
         )
         return self._controlled_status(authorization)
 
+    def pending_controlled_test_authorization_status(self) -> ControlledAuthorizationStatus:
+        authorization = self.ledger.pending_controlled_test_authorization()
+        return self._controlled_status(authorization)
+
     @staticmethod
     def _controlled_status(authorization) -> ControlledAuthorizationStatus:
         if authorization is None:
@@ -392,6 +440,7 @@ class MockVideoJobService:
             scene_key=authorization.scene_key,
             source_signature=authorization.source_signature,
             model=authorization.model,
+            state=authorization.state,
         )
 
     def request_approval(
@@ -473,6 +522,20 @@ class MockVideoJobService:
         with self._lock:
             record = self._images.get(image_handle)
             return bool(record and record.client_id == client_id)
+
+    def direct_context(self, client_id: str) -> dict | None:
+        with self._lock:
+            context = self._direct_contexts.get(client_id)
+            return dict(context) if context else None
+
+    def storyboard_image(self, image_handle: str, client_id: str) -> tuple[bytes, str]:
+        with self._lock:
+            record = self._images.get(image_handle)
+            if not record or record.client_id != client_id:
+                raise StoryboardImageMissing(
+                    "Storyboard image is no longer available for this client."
+                )
+            return record.image_bytes, record.mime_type
 
     def create(
         self,
@@ -805,6 +868,25 @@ class MockVideoJobService:
                 "The authorized replacement is unavailable for this client or job."
             )
         raise GenerationLimitReached("Real Veo generation allowance is exhausted.")
+
+    def _restore_durable_direct_context(self) -> None:
+        for restored in self.ledger.all_direct_contexts():
+            self._direct_contexts[restored["client_id"]] = {
+                "scene_key": restored["scene_key"],
+                "source_signature": restored["source_signature"],
+                "analysis_source": restored["analysis_source"],
+                "image_handle": restored["image_handle"],
+                "screenplay": restored["screenplay"],
+                "creative_intent": restored["creative_intent"],
+                "direction_response": restored["direction_response"],
+                "eligibility": restored["eligibility"],
+            }
+            if restored["image_handle"] and restored["storyboard_bytes"]:
+                self._images[restored["image_handle"]] = _ImageRecord(
+                    restored["client_id"],
+                    restored["storyboard_bytes"],
+                    restored["storyboard_mime_type"] or "application/octet-stream",
+                )
 
     def _restore_durable_jobs(self) -> None:
         if self.provider_name != "vertex":

@@ -19,6 +19,7 @@ from cinema_agent.schemas import DirectRequest, DirectResponse
 from cinema_agent.schemas import (
     ControlledAuthorizationRequest,
     ControlledAuthorizationStatus,
+    DirectRecoveryResponse,
     VideoAllowanceStatus,
     VideoApproval,
     VideoApprovalRequest,
@@ -245,6 +246,20 @@ def activate_video_test_authorization(
         raise _video_error(error) from error
 
 
+@app.post(
+    "/api/video-test-authorization/pending",
+    response_model=ControlledAuthorizationStatus,
+)
+def create_pending_video_test_authorization():
+    try:
+        return video_job_service.create_pending_controlled_test_authorization(
+            authorization_id="pending-auth-final-fight-demo",
+            model="veo-3.1-generate-001",
+        )
+    except VideoJobError as error:
+        raise _video_error(error) from error
+
+
 @app.get(
     "/api/video-test-authorization",
     response_model=ControlledAuthorizationStatus,
@@ -263,11 +278,47 @@ def video_test_authorization(
     )
 
 
+@app.get(
+    "/api/video-test-authorization/pending",
+    response_model=ControlledAuthorizationStatus,
+)
+def pending_video_test_authorization():
+    return video_job_service.pending_controlled_test_authorization_status()
+
+
 @app.get("/api/storyboard-images/{image_handle}")
 def storyboard_image_availability(image_handle: str, http_request: Request):
     if not video_job_service.image_available(image_handle, _session_id(http_request)):
         raise HTTPException(status_code=404, detail="Storyboard image is no longer available for this session.")
     return {"available": True}
+
+
+@app.get("/api/storyboard-images/{image_handle}/content")
+def storyboard_image_content(image_handle: str, http_request: Request):
+    try:
+        content, media_type = video_job_service.storyboard_image(
+            image_handle,
+            _session_id(http_request),
+        )
+        return Response(content=content, media_type=media_type)
+    except VideoJobError as error:
+        raise _video_error(error) from error
+
+
+@app.get("/api/direct/recovery", response_model=DirectRecoveryResponse | None)
+def recover_direct_scene(http_request: Request):
+    context = video_job_service.direct_context(_session_id(http_request))
+    if not context:
+        return None
+    return DirectRecoveryResponse(
+        scene_key=context["scene_key"],
+        source_signature=context["source_signature"],
+        screenplay=context["screenplay"],
+        creative_intent=context["creative_intent"],
+        direction_response=context["direction_response"],
+        created_at=context["created_at"],
+        updated_at=context["updated_at"],
+    )
 
 
 def _session_id(http_request: Request) -> str:
@@ -295,6 +346,77 @@ def _direct_scene_identity(plan, critique, image_handle: str | None) -> tuple[st
         return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:24]
 
     return f"scene-{digest(scene_payload)}", f"source-{digest(source_payload)}"
+
+
+def _controlled_scene_eligibility(plan, screenplay, routing, analysis_source, image_handle):
+    evidence_text = " ".join(
+        [
+            screenplay,
+            plan.scene_summary,
+            plan.focal_subject,
+            *[
+                " ".join(
+                    filter(
+                        None,
+                        (
+                            entity.label,
+                            entity.visual_evidence,
+                            entity.screenplay_evidence,
+                            entity.semantic_category,
+                        ),
+                    )
+                )
+                for entity in plan.motion_plan.visible_characters
+            ],
+            *[
+                " ".join(
+                    filter(
+                        None,
+                        (
+                            entity.label,
+                            entity.visual_evidence,
+                            entity.screenplay_evidence,
+                            entity.semantic_category,
+                        ),
+                    )
+                )
+                for entity in plan.motion_plan.visible_environment
+            ],
+        ]
+    ).lower()
+    characters = [
+        entity
+        for entity in plan.motion_plan.visible_characters
+        if entity.entity_type == "character"
+        and entity.support != "unsupported"
+        and entity.visual_confidence > 0
+        and not re.search(r"\b(child|kid|teen|teenager|baby|infant)\b", entity.label.lower())
+    ]
+    distinct_character_keys = {
+        entity.entity_id or entity.label.strip().lower()
+        for entity in characters
+    }
+    fight_scene = bool(re.search(r"\b(fight|fighting|combat|battle)\b", evidence_text))
+    rain_depot_storyboard = (
+        "rain" in evidence_text
+        and bool(re.search(r"\b(train|depot|platform|railway|station)\b", evidence_text))
+    )
+    controlled_test_eligible = (
+        analysis_source == "vertex_multimodal"
+        and bool(image_handle)
+        and routing.classification == "GENERATIVE_VIDEO_REQUIRED"
+        and len(distinct_character_keys) == 3
+        and fight_scene
+        and rain_depot_storyboard
+    )
+    return {
+        "controlled_test_eligible": controlled_test_eligible,
+        "storyboard_valid": bool(image_handle),
+        "generative_video_required": routing.classification == "GENERATIVE_VIDEO_REQUIRED",
+        "fight_scene": fight_scene,
+        "rain_depot_storyboard": rain_depot_storyboard,
+        "adult_character_count": len(distinct_character_keys),
+    }
 
 
 def _video_error(error: VideoJobError) -> HTTPException:
@@ -519,14 +641,7 @@ def direct_scene(request: DirectRequest, http_request: Request):
     if compiled_revision.adjustment:
         activity.insert(4, {"step": "REVISION", "detail": compiled_revision.adjustment})
     scene_key, source_signature = _direct_scene_identity(plan, critique, image_handle)
-    video_job_service.remember_direct_context(
-        client_id=_session_id(http_request),
-        scene_key=scene_key,
-        source_signature=source_signature,
-        analysis_source=analysis_source,
-        image_handle=image_handle,
-    )
-    return DirectResponse(
+    direct_response = DirectResponse(
         mode=mode,
         analysis_source=analysis_source,
         scene_key=scene_key,
@@ -544,3 +659,21 @@ def direct_scene(request: DirectRequest, http_request: Request):
         revision_shot_signature=compiled_revision.signature,
         revision_diversity_adjustment=compiled_revision.adjustment,
     )
+    video_job_service.remember_direct_context(
+        client_id=_session_id(http_request),
+        scene_key=scene_key,
+        source_signature=source_signature,
+        analysis_source=analysis_source,
+        image_handle=image_handle,
+        screenplay=request.screenplay,
+        creative_intent=request.mood,
+        direction_response=direct_response.model_dump(mode="json"),
+        eligibility=_controlled_scene_eligibility(
+            plan,
+            request.screenplay,
+            routing,
+            analysis_source,
+            image_handle,
+        ),
+    )
+    return direct_response

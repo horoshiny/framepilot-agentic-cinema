@@ -121,6 +121,48 @@ def test_approval_is_bound_to_the_exact_scene_context():
         service.create(altered, "client-a")
 
 
+def test_pending_authorization_is_unbound_and_direct_context_survives_restart(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("VIDEO_GENERATION_PROVIDER", "vertex")
+    monkeypatch.setenv("ALLOW_VEO_GENERATION", "true")
+    ledger_path = str(tmp_path / "durable-direct.sqlite3")
+    first = MockVideoJobService(provider=FakeVertexProvider(), ledger_path=ledger_path)
+    pending = first.create_pending_controlled_test_authorization(
+        authorization_id="pending-auth-final-fight-demo",
+        model="veo-3.1-generate-001",
+    )
+    assert pending.authorization_id == "pending-auth-final-fight-demo"
+    assert pending.state == "pending"
+    assert pending.available is False
+
+    image_handle = first.register_image(
+        "data:image/png;base64,ZmFrZS1zdG9yeWJvYXJk",
+        "session-a",
+    )
+    first.remember_direct_context(
+        client_id="session-a",
+        scene_key="scene-final-fight",
+        source_signature="source-final-fight",
+        analysis_source="vertex_multimodal",
+        image_handle=image_handle,
+        screenplay="Three adults fight on the rain-soaked depot platform.",
+        creative_intent="urgent",
+        direction_response={"mode": "vertex", "plan": {"motion_plan": {}}},
+        eligibility={"controlled_test_eligible": True},
+    )
+
+    second = MockVideoJobService(provider=FakeVertexProvider(), ledger_path=ledger_path)
+    context = second.direct_context("session-a")
+    assert context["scene_key"] == "scene-final-fight"
+    assert context["screenplay"].startswith("Three adults")
+    assert second.image_available(image_handle, "session-a")
+    restored_bytes, restored_type = second.storyboard_image(image_handle, "session-a")
+    assert restored_bytes.startswith(b"fake-storyboard")
+    assert restored_type == "image/png"
+    assert second.ledger.pending_controlled_test_authorization().client_id is None
+
+
 class FakeVertexProvider:
     name = "vertex"
 
@@ -364,6 +406,12 @@ def test_controlled_activation_claims_only_current_vertex_direct_context_without
         source_signature="source-castors-current",
         analysis_source="vertex_multimodal",
         image_handle=image_handle,
+        eligibility={"controlled_test_eligible": True},
+    )
+    ledger.create_pending_controlled_test_authorization(
+        authorization_id="pending-auth-final-fight-demo",
+        model="veo-3.1-generate-001",
+        created_at=1.0,
     )
 
     request_to_activate = ControlledAuthorizationRequest(
@@ -430,6 +478,12 @@ def test_controlled_activation_reclaims_unused_closed_session_authorization(
         source_signature="source-floating-market",
         analysis_source="vertex_multimodal",
         image_handle=image_handle,
+        eligibility={"controlled_test_eligible": True},
+    )
+    ledger.create_pending_controlled_test_authorization(
+        authorization_id="pending-auth-final-fight-demo",
+        model="veo-3.1-generate-001",
+        created_at=1.0,
     )
 
     activated = service.activate_controlled_test_authorization(
@@ -488,6 +542,12 @@ def test_controlled_activation_rejects_an_existing_active_first_cut(
         source_signature="source-floating-market",
         analysis_source="vertex_multimodal",
         image_handle=image_handle,
+        eligibility={"controlled_test_eligible": True},
+    )
+    ledger.create_pending_controlled_test_authorization(
+        authorization_id="pending-auth-final-fight-demo",
+        model="veo-3.1-generate-001",
+        created_at=1.0,
     )
 
     with pytest.raises(ControlledAuthorizationUnavailable, match="active First Cut"):

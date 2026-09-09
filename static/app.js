@@ -138,6 +138,14 @@ function hasAvailableControlledTestAuthorization() {
   );
 }
 
+function hasPendingControlledTestAuthorization() {
+  return Boolean(
+    isVertexVideoProvider()
+      && controlledTestAuthorization?.state === 'pending'
+      && controlledTestAuthorization.model === videoModel,
+  );
+}
+
 function firstCutAllowanceUnavailable() {
   return realAllowanceUnavailable()
     && !hasAvailableReplacementAuthorization()
@@ -299,6 +307,7 @@ function renderControlledAuthorizationAction() {
     && Boolean(videoSourceSignature)
     && data.routing?.classification === 'GENERATIVE_VIDEO_REQUIRED'
     && realAllowanceUnavailable()
+    && hasPendingControlledTestAuthorization()
     && !hasAvailableReplacementAuthorization()
     && !hasAvailableControlledTestAuthorization()
     && !firstCutSubmissionBlocked();
@@ -932,8 +941,13 @@ async function refreshVideoAllowance() {
 }
 
 async function prepareControlledTestAuthorization() {
-  controlledTestAuthorization = null;
   controlledTestAuthorizationError = null;
+  try {
+    const response = await fetch('/api/video-test-authorization/pending');
+    controlledTestAuthorization = response.ok ? await response.json() : null;
+  } catch {
+    controlledTestAuthorization = null;
+  }
   renderControlledAuthorizationAction();
 }
 
@@ -2136,7 +2150,7 @@ async function restoreVideoRecovery() {
     $('#mood').value = snapshot.creative_intent;
     imageData = null;
     $('#uploadState').textContent = snapshot.direction_response.image_handle
-      ? 'Storyboard image preview requires re-upload after refresh'
+      ? 'Restoring storyboard image…'
       : 'No storyboard image saved';
     $('#uploadedScene').hidden = true;
     stage.classList.remove('has-upload');
@@ -2145,6 +2159,11 @@ async function restoreVideoRecovery() {
       snapshot.scene,
       { prepareAuthorization: false },
     );
+    if (snapshot.direction_response.image_handle) {
+      await restoreStoryboardPreview(
+        `/api/storyboard-images/${encodeURIComponent(snapshot.direction_response.image_handle)}/content`,
+      );
+    }
     setRecoveryMessage('');
 
     await refreshVideoAllowance();
@@ -2208,20 +2227,19 @@ async function restoreVideoRecovery() {
     ));
     pendingJobs.forEach(({ kind, jobId }) => pollVideoJob(kind, jobId));
 
-    if (data.image_handle) {
+    if (data?.image_handle && !imageData) {
       try {
         const imageResponse = await fetch(
           `/api/storyboard-images/${encodeURIComponent(data.image_handle)}`,
         );
         if (!imageResponse.ok) {
           appendRecoveryMessage(
-            'The uploaded storyboard image is no longer available for this session. '
-            + 'Re-upload it before requesting another approved job.',
+            'The uploaded storyboard image is no longer available for this session.',
           );
         } else {
           appendRecoveryMessage(
             'The scene and video jobs were restored, but the storyboard image preview '
-            + 'is not stored in the browser. Re-upload it to view the image again.',
+            + 'could not be restored.',
           );
         }
       } catch {
@@ -2237,6 +2255,34 @@ async function restoreVideoRecovery() {
     resetVideoStates();
     closeVideoDialogs();
     setRecoveryMessage('Saved recovery data could not be restored. Direct the scene again.');
+  }
+}
+
+async function restoreDurableDirectContext() {
+  try {
+    const response = await fetch('/api/direct/recovery');
+    if (!response.ok) return false;
+    const recovery = await response.json();
+    if (!recovery?.direction_response?.plan) return false;
+    $('#screenplay').value = recovery.screenplay;
+    $('#mood').value = recovery.creative_intent;
+    renderDirectedResult(
+      recovery.direction_response,
+      {
+        scene_key: recovery.scene_key,
+        source_signature: recovery.source_signature,
+      },
+      { prepareAuthorization: true },
+    );
+    if (recovery.direction_response.image_handle) {
+      await restoreStoryboardPreview(
+        `/api/storyboard-images/${encodeURIComponent(recovery.direction_response.image_handle)}/content`,
+      );
+    }
+    saveRecoverySnapshot();
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -2329,4 +2375,8 @@ fetch('/api/health')
   })
   .catch(() => {});
 
-restoreVideoRecovery().then(restoreLatestCompletedFirstCut);
+restoreDurableDirectContext().then(restored => (
+  restored
+    ? restoreVideoRecovery().then(restoreLatestCompletedFirstCut)
+    : restoreVideoRecovery().then(restoreLatestCompletedFirstCut)
+));

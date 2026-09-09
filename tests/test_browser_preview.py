@@ -1511,6 +1511,23 @@ def test_floating_market_activation_reenables_first_cut_without_direct_or_provid
                     ),
                 )
 
+            page.route(
+                "**/api/video-test-authorization/pending",
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "authorization_id": "pending-auth-final-fight-demo",
+                            "available": False,
+                            "state": "pending",
+                            "kind": "first_cut",
+                            "model": "veo-3.1-generate-001",
+                            "source": "authorized_test_attempt",
+                        }
+                    ),
+                ),
+            )
             page.route("**/api/video-test-authorization", authorization_route)
             page.goto(BASE_URL, wait_until="networkidle")
             page.fill(

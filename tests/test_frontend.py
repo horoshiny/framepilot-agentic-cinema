@@ -160,7 +160,8 @@ def test_frontend_persists_safe_versioned_recovery_snapshot_and_restores_jobs():
     assert "/api/video-jobs/${encodeURIComponent(jobId)}" in app_js
     assert "Re-upload it before requesting another approved job." in app_js
     assert "Saved recovery data was outdated or invalid and was discarded." in app_js
-    assert "restoreVideoRecovery().then(restoreLatestCompletedFirstCut);" in app_js
+    assert "restoreDurableDirectContext" in app_js
+    assert "restoreVideoRecovery().then(restoreLatestCompletedFirstCut)" in app_js
 
 
 def test_upload_success_shows_preview_and_hides_empty_state():

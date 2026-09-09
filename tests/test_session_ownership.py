@@ -155,6 +155,12 @@ def test_controlled_activation_endpoint_claims_only_the_current_session_scene(mo
         source_signature="source-castors-current",
         analysis_source="vertex_multimodal",
         image_handle=image_handle,
+        eligibility={"controlled_test_eligible": True},
+    )
+    service.ledger.create_pending_controlled_test_authorization(
+        authorization_id="pending-auth-final-fight-demo",
+        model="veo-3.1-generate-001",
+        created_at=1.0,
     )
 
     response = client.post(
