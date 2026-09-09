@@ -200,6 +200,76 @@ def test_top_level_optional_corruption_does_not_discard_valid_objects():
     assert "main_character_id:string_type" in analysis.conflicts
 
 
+def test_overlong_mood_is_shortened_at_sentence_boundary_and_strictly_validated():
+    payload = _analysis().model_dump()
+    payload["mood"] = (
+        "First complete mood sentence. Second complete mood sentence. "
+        + ("additional mood detail " * 40)
+    )
+
+    analysis = vertex._parse_scene_analysis_response(json.dumps(payload))
+
+    assert analysis.mood == "First complete mood sentence. Second complete mood sentence."
+    assert len(analysis.mood) <= SceneAnalysis.model_fields["mood"].metadata[-1].max_length
+    assert "mood:string_too_long" in analysis.conflicts
+    assert SceneAnalysis.model_validate(analysis.model_dump()).mood == analysis.mood
+    assert [entity.label for entity in analysis.characters] == ["courier"]
+    assert [entity.label for entity in analysis.objects] == ["signal flag", "bridge"]
+    assert [entity.label for entity in analysis.environment] == ["fog"]
+    assert len(analysis.relationships) == 1
+    assert analysis.relationships[0].source_id == "courier-entity"
+    assert analysis.relationships[0].target_id == "signal-flag-entity"
+
+
+def test_valid_mood_is_unchanged_and_top_level_limits_are_model_derived():
+    payload = _analysis().model_dump()
+    valid_mood = "quiet, observant tension"
+    payload["mood"] = valid_mood
+    payload["scene_summary"] = "A complete summary. " + ("detail " * 100)
+    payload["preserve"] = ["A complete preservation rule. " + ("detail " * 80)]
+
+    analysis = vertex._parse_scene_analysis_response(json.dumps(payload))
+
+    assert analysis.mood == valid_mood
+    assert len(analysis.scene_summary) <= 400
+    assert len(analysis.preserve[0]) <= 240
+    assert "scene_summary:string_too_long" in analysis.conflicts
+    assert "preserve.0:too_long" in analysis.conflicts
+
+
+def test_overlong_mood_without_sentence_boundary_ends_at_word_boundary():
+    payload = _analysis().model_dump()
+    words = [f"moodword{index}" for index in range(160)]
+    payload["mood"] = " ".join(words)
+
+    analysis = vertex._parse_scene_analysis_response(json.dumps(payload))
+
+    assert len(analysis.mood) <= 500
+    assert analysis.mood == " ".join(words[: len(analysis.mood.split())])
+    assert not analysis.mood.endswith(" ")
+    assert "mood:string_too_long" in analysis.conflicts
+
+
+def test_unusable_scene_analysis_still_requires_deterministic_fallback():
+    with pytest.raises(ValueError, match="no recoverable semantic entities"):
+        vertex._parse_scene_analysis_response("{}")
+
+
+def test_validation_diagnostics_do_not_log_raw_model_output(caplog):
+    raw_marker = "RAW_MODEL_MOOD_SHOULD_NOT_APPEAR"
+    payload = _analysis().model_dump()
+    payload["mood"] = raw_marker + (" detail" * 120)
+    raw_response = json.dumps(payload)
+
+    with caplog.at_level("WARNING", logger="cinema_agent.vertex"):
+        vertex._log_response_diagnostics(
+            SimpleNamespace(text=raw_response, candidates=[]),
+            raw_response,
+        )
+
+    assert raw_marker not in caplog.text
+
+
 def test_director_prompt_separates_manipulated_objects_from_environment():
     prompt = vertex.DIRECTOR_PROMPT
 

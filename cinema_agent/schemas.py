@@ -239,6 +239,7 @@ class SceneAnalysis(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     scene_summary: str = Field(min_length=1, max_length=400)
+    mood: str = Field(default="cinematic", max_length=500)
     characters: list[SceneEntity] = Field(default_factory=list, max_length=12)
     objects: list[SceneEntity] = Field(default_factory=list, max_length=16)
     environment: list[SceneEntity] = Field(default_factory=list, max_length=12)

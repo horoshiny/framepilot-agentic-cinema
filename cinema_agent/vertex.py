@@ -4,6 +4,7 @@ import logging
 import math
 import os
 import re
+from typing import Annotated, get_args, get_origin
 
 from google import genai
 from google.genai import types
@@ -29,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 DIRECTOR_PROMPT = """You are FramePilot's multimodal scene analyst. Analyze the screenplay, creative
 intent, and optional storyboard image. Return exactly one compact JSON object with:
-scene_summary:string; characters:SceneEntity[]; objects:SceneEntity[];
+scene_summary:string; mood:string; characters:SceneEntity[]; objects:SceneEntity[];
 environment:SceneEntity[]; camera:CameraAnalysis; preserve:string[]; prohibit:string[];
 conflicts:string[]; main_character_id:string|null; relationships:SceneRelationship[].
 
@@ -190,11 +191,57 @@ def _shorten_at_boundary(value: str, limit: int) -> str:
         for index, character in enumerate(window)
         if character in ".!?" and (index + 1 == len(window) or window[index + 1].isspace())
     ]
-    if sentence_ends and max(sentence_ends) >= limit // 2:
+    if sentence_ends:
         return window[: max(sentence_ends)].rstrip()
     if " " in window:
         return window.rsplit(" ", 1)[0].rstrip()
     return window.rstrip()
+
+
+def _max_length_from_metadata(metadata) -> int | None:
+    for item in metadata:
+        max_length = getattr(item, "max_length", None)
+        if isinstance(max_length, int):
+            return max_length
+        nested_metadata = getattr(item, "metadata", None)
+        if nested_metadata:
+            nested_limit = _max_length_from_metadata(nested_metadata)
+            if nested_limit is not None:
+                return nested_limit
+    return None
+
+
+def _declared_max_length(model_type, field_name: str, *, item: bool = False) -> int:
+    field = model_type.model_fields.get(field_name)
+    if field is None:
+        raise KeyError(f"{model_type.__name__}.{field_name} is not declared")
+
+    if not item:
+        limit = _max_length_from_metadata(field.metadata)
+    else:
+        annotation = field.annotation
+        item_args = get_args(annotation)
+        if get_origin(annotation) in {list, tuple, set, frozenset} and item_args:
+            annotation = item_args[0]
+        if get_origin(annotation) is Annotated:
+            limit = _max_length_from_metadata(get_args(annotation)[1:])
+        else:
+            limit = None
+    if limit is None:
+        raise ValueError(f"{model_type.__name__}.{field_name} has no declared string maximum")
+    return limit
+
+
+def _shorten_declared_string(
+    value: str,
+    model_type,
+    field_name: str,
+    *,
+    item: bool = False,
+) -> tuple[str, bool]:
+    limit = _declared_max_length(model_type, field_name, item=item)
+    shortened = _shorten_at_boundary(value, limit)
+    return shortened, shortened != value
 
 
 def _safe_validation_conflicts(prefix: str, error: ValidationError) -> list[str]:
@@ -226,7 +273,7 @@ def _sanitize_bounded_string_list(
     *,
     path: str,
     limit: int,
-    item_limit: int = 240,
+    item_limit: int,
 ) -> tuple[list[str], list[str]]:
     """Keep optional descriptive lists safe without failing core analysis."""
     issues: list[str] = []
@@ -282,8 +329,12 @@ def _sanitize_camera_analysis(value) -> tuple[dict, list[str]]:
     movement = value.get("movement")
     if isinstance(movement, str):
         normalized_movement = re.sub(r"\s+", " ", movement).strip()
-        movement = _shorten_at_boundary(normalized_movement, 80)
-        if movement != normalized_movement:
+        movement, shortened = _shorten_declared_string(
+            normalized_movement,
+            CameraAnalysis,
+            "movement",
+        )
+        if shortened:
             issues.append("camera.movement:too_long")
     if not movement:
         issues.append("camera.movement:invalid")
@@ -303,9 +354,13 @@ def _sanitize_camera_analysis(value) -> tuple[dict, list[str]]:
             recovered[field] = None
             continue
         normalized_evidence = re.sub(r"\s+", " ", evidence).strip()
-        evidence = _shorten_at_boundary(normalized_evidence, 240)
+        evidence, shortened = _shorten_declared_string(
+            normalized_evidence,
+            CameraAnalysis,
+            field,
+        )
         recovered[field] = evidence or None
-        if evidence != normalized_evidence:
+        if shortened:
             issues.append(f"camera.{field}:too_long")
         if len(evidence) == 0:
             issues.append(f"camera.{field}:empty")
@@ -362,17 +417,22 @@ def _sanitize_scene_entity(value, *, path: str) -> tuple[dict | None, list[str]]
     )
     if label is None:
         return None, [*issues, f"{path}.label:missing"]
-    label = _shorten_at_boundary(re.sub(r"\s+", " ", label).strip(), 80)
+    label, label_shortened = _shorten_declared_string(
+        re.sub(r"\s+", " ", label).strip(),
+        SceneEntity,
+        "label",
+    )
+    if label_shortened:
+        issues.append(f"{path}.label:too_long")
     if not label:
         return None, [*issues, f"{path}.label:empty"]
 
     recovered = {"label": label}
-    for field, limit in (
-        ("entity_id", 64),
-        ("semantic_category", 64),
-        ("action", 240),
-        ("visual_evidence", 240),
-        ("screenplay_evidence", 240),
+    for field in (
+        "semantic_category",
+        "action",
+        "visual_evidence",
+        "screenplay_evidence",
     ):
         raw = value.get(field)
         if field == "action" and raw is None:
@@ -385,10 +445,32 @@ def _sanitize_scene_entity(value, *, path: str) -> tuple[dict | None, list[str]]
             recovered[field] = None
             continue
         normalized = re.sub(r"\s+", " ", raw).strip()
-        bounded = _shorten_at_boundary(normalized, limit)
-        if bounded != normalized:
+        bounded, shortened = _shorten_declared_string(
+            normalized,
+            SceneEntity,
+            field,
+        )
+        if shortened:
             issues.append(f"{path}.{field}:too_long")
         recovered[field] = bounded or None
+
+    entity_id = value.get("entity_id")
+    if entity_id is None:
+        recovered["entity_id"] = None
+    elif not isinstance(entity_id, str):
+        issues.append(f"{path}.entity_id:string_type")
+        recovered["entity_id"] = None
+    else:
+        normalized_id = entity_id.strip()
+        if not normalized_id:
+            issues.append(f"{path}.entity_id:empty")
+            recovered["entity_id"] = None
+        elif len(normalized_id) > _declared_max_length(SceneEntity, "entity_id"):
+            # IDs are references, not descriptive prose: never shorten them.
+            issues.append(f"{path}.entity_id:string_too_long")
+            return None, issues
+        else:
+            recovered["entity_id"] = normalized_id
 
     grounding_source = value.get("grounding_source")
     valid_grounding = {
@@ -481,6 +563,7 @@ def _sanitize_scene_entity(value, *, path: str) -> tuple[dict | None, list[str]]
 def _sanitize_scene_analysis_payload(payload: dict) -> dict:
     allowed_fields = {
         "scene_summary",
+        "mood",
         "characters",
         "objects",
         "environment",
@@ -502,12 +585,31 @@ def _sanitize_scene_analysis_payload(payload: dict) -> dict:
         )
     else:
         normalized_summary = re.sub(r"\s+", " ", scene_summary).strip()
-        sanitized["scene_summary"] = (
-            _shorten_at_boundary(normalized_summary, 400)
-            or "Scene summary unavailable."
+        sanitized["scene_summary"], shortened = _shorten_declared_string(
+            normalized_summary,
+            SceneAnalysis,
+            "scene_summary",
         )
+        if shortened:
+            diagnostics.append("scene_summary:string_too_long")
         if not normalized_summary:
             diagnostics.append("scene_summary:empty")
+        if not sanitized["scene_summary"]:
+            sanitized["scene_summary"] = "Scene summary unavailable."
+
+    mood = sanitized.get("mood")
+    if mood is not None:
+        if not isinstance(mood, str):
+            sanitized.pop("mood", None)
+            diagnostics.append("mood:string_type")
+        else:
+            sanitized["mood"], shortened = _shorten_declared_string(
+                mood,
+                SceneAnalysis,
+                "mood",
+            )
+            if shortened:
+                diagnostics.append("mood:string_too_long")
 
     main_character_id = sanitized.get("main_character_id")
     if main_character_id is not None:
@@ -519,13 +621,17 @@ def _sanitize_scene_analysis_payload(payload: dict) -> dict:
             if not normalized_id:
                 sanitized["main_character_id"] = None
                 diagnostics.append("main_character_id:empty")
+            elif len(normalized_id) > _declared_max_length(SceneAnalysis, "main_character_id"):
+                sanitized["main_character_id"] = None
+                diagnostics.append("main_character_id:string_too_long")
             else:
-                sanitized["main_character_id"] = _shorten_at_boundary(normalized_id, 64)
+                sanitized["main_character_id"] = normalized_id
 
     conflicts, conflict_issues = _sanitize_bounded_string_list(
         sanitized.get("conflicts", []),
         path="conflicts",
         limit=8,
+        item_limit=_declared_max_length(SceneAnalysis, "conflicts", item=True),
     )
     diagnostics.extend(conflict_issues)
 
@@ -537,6 +643,7 @@ def _sanitize_scene_analysis_payload(payload: dict) -> dict:
             sanitized.get(field, []),
             path=field,
             limit=limit,
+            item_limit=_declared_max_length(SceneAnalysis, field, item=True),
         )
         diagnostics.extend(issues)
 
@@ -621,6 +728,7 @@ def _sanitize_scene_analysis_payload(payload: dict) -> dict:
         all_diagnostics,
         path="conflicts",
         limit=8,
+        item_limit=_declared_max_length(SceneAnalysis, "conflicts", item=True),
     )[0][:8]
     return sanitized
 
